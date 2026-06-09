@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HardenCheck — social card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{margin:0}
+  .card{
+    width:1200px;height:630px;position:relative;overflow:hidden;
+    background:#faf8f4;color:#14181f;
+    font-family:"Hanken Grotesk",ui-sans-serif,system-ui,sans-serif;
+    padding:74px 86px;display:flex;flex-direction:column;justify-content:space-between;
+  }
+  .ring{position:absolute;width:560px;height:560px;border:70px solid #f6ebe2;border-radius:50%;right:-200px;top:-170px;opacity:.85}
+  .ring-2{position:absolute;width:300px;height:300px;border:42px solid #e3eeef;border-radius:50%;right:120px;bottom:-150px;opacity:.7}
+  .top,.tagline,.foot{position:relative;z-index:1}
+
+  .brand{display:flex;align-items:center;gap:18px}
+  .mark{width:64px;height:64px;flex:0 0 auto}
+  .wordmark{font-family:"Fraunces",Georgia,serif;font-weight:700;font-size:46px;letter-spacing:-.02em}
+
+  .eyebrow{margin-top:48px;color:#8f4a22;font-weight:700;font-size:21px;letter-spacing:.12em;text-transform:uppercase}
+  .tagline{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:64px;line-height:1.06;letter-spacing:-.015em;max-width:19ch;margin-top:16px}
+  .tagline .hl{color:#bf6b3c}
+  .browser{display:inline-flex;align-items:center;gap:14px;margin-top:28px;background:#e3eeef;color:#13525a;font-weight:700;font-size:23px;padding:12px 22px;border-radius:999px}
+  .dot{width:13px;height:13px;border-radius:50%;background:#2f7d52;box-shadow:0 0 0 5px rgba(47,125,82,.18)}
+
+  /* the report-card grade chip, echoing the product hero */
+  .grade-chip{position:absolute;right:96px;top:170px;z-index:1;width:188px;height:188px;border-radius:50%;border:12px solid #2f7d52;display:flex;align-items:center;justify-content:center;background:#fff;box-shadow:0 16px 40px -16px rgba(20,24,31,.25)}
+  .grade-chip b{font-family:"Fraunces",Georgia,serif;font-weight:700;font-size:120px;line-height:1;color:#2f7d52}
+
+  .foot{display:flex;align-items:center;justify-content:space-between}
+  .foot .made{color:#665f54;font-size:24px;font-weight:600}
+  .foot .made b{color:#14181f;font-weight:700}
+  .chips{display:flex;gap:12px}
+  .chip{font-size:19px;font-weight:700;padding:8px 16px;border-radius:8px}
+  .chip.fail{background:#f9e7e4;color:#bb392b}
+  .chip.warn{background:#f9f0dd;color:#a9711a}
+  .chip.pass{background:#e8f3ec;color:#2f7d52}
+</style>
+</head>
+<body>
+  <!-- Render this at 1200x630 to produce og-image.png (see BUILD-NOTES.md). -->
+  <div class="card">
+    <div class="ring"></div>
+    <div class="ring-2"></div>
+
+    <div class="grade-chip"><b>A</b></div>
+
+    <div class="top">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </div>
+      <p class="eyebrow">Security-header &amp; cookie scanner</p>
+      <h1 class="tagline">Grade your <span class="hl">security headers</span> — in your browser</h1>
+      <span class="browser"><span class="dot"></span>A–F report card with copy-paste fixes</span>
+    </div>
+
+    <div class="foot">
+      <p class="made">A <b>Copper Bay Labs</b> product</p>
+      <div class="chips">
+        <span class="chip fail">FAIL</span>
+        <span class="chip warn">WARN</span>
+        <span class="chip pass">PASS</span>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

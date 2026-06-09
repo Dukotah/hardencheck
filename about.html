@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How HardenCheck works — security-header methodology & privacy</title>
+<meta name="description" content="How HardenCheck grades your HTTP security headers and cookie flags entirely in your browser: what each header does, how the A–F grade is calculated, the CORS-proxy limitation, the privacy guarantee, and how to read your real headers.">
+<link rel="canonical" href="https://dukotah.github.io/hardencheck/about.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How HardenCheck works — methodology & privacy">
+<meta property="og:description" content="What each security header does, how the A–F grade is calculated, the CORS-proxy limitation, and the client-side privacy guarantee.">
+<meta property="og:url" content="https://dukotah.github.io/hardencheck/about.html">
+<meta property="og:image" content="https://dukotah.github.io/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How HardenCheck works — methodology & privacy","description":"How HardenCheck grades HTTP security headers and cookie flags entirely in your browser, how the A–F grade is calculated, the CORS-proxy limitation, and the client-side privacy guarantee.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"mainEntityOfPage":"https://dukotah.github.io/hardencheck/about.html"}
+</script>
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="./" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="about.html" aria-current="page">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Methodology &amp; privacy</p>
+    <h1>How HardenCheck works</h1>
+    <p class="lede">HardenCheck reads your site's HTTP response headers and cookie flags, grades each one, and turns the result into an A–F report card with copy-paste fixes. This page explains what each header does, how the grade is calculated, the limits of fetching headers from the browser, and the privacy guarantee.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#privacy">Privacy guarantee</a></li>
+      <li><a href="#headers">The headers we grade</a></li>
+      <li><a href="#cookies">Cookie flags</a></li>
+      <li><a href="#grade">How the grade is calculated</a></li>
+      <li><a href="#proxy">URL mode &amp; the proxy limit</a></li>
+      <li><a href="#accurate">Get an accurate grade</a></li>
+      <li><a href="#disclaimer">Not a security audit</a></li>
+      <li><a href="#roadmap">Roadmap</a></li>
+    </ul>
+
+    <h2 id="privacy">The privacy guarantee: it runs in your browser</h2>
+    <p>HardenCheck has <strong>no backend</strong>. The grading engine is JavaScript that runs locally in this tab. When you paste a header block, every byte stays on your machine — it's never uploaded, logged, or stored.</p>
+    <p>There is exactly one network exception, and it only applies to <strong>URL mode</strong>: to read another site's headers from your browser, the request is routed through a public CORS proxy (see <a href="#proxy">below</a>). <strong>Paste mode makes no network request at all</strong> — load the page once, go offline, and it still grades your headers.</p>
+    <div class="callout">
+      <strong>Verify it yourself.</strong> Open developer tools, switch to the Network tab, and run a check in paste mode. You won't see any request carrying your headers — because there isn't one.
+    </div>
+
+    <h2 id="headers">The headers we grade</h2>
+    <p>HardenCheck grades the response headers that materially change a site's security posture. Severity reflects how much risk a missing or weak header typically adds, on a four-tier scale — <span class="sev crit">Critical</span>, <span class="sev high">High</span>, <span class="sev med">Medium</span>, <span class="sev low">Low</span> — coloured exactly as they appear on the report card. A missing CSP or HSTS is <span class="sev high">High</span>; a missing frame or sniff protection is <span class="sev med">Medium</span>; finer-grained controls are <span class="sev low">Low</span>. The two strongest controls (CSP and HSTS) being absent <em>at the same time</em> escalates to <span class="sev crit">Critical</span>, as does a cookie that sets neither <code class="inline">Secure</code> nor <code class="inline">HttpOnly</code>.</p>
+    <div class="tbl-wrap">
+      <table class="detect">
+        <thead>
+          <tr><th scope="col">Header</th><th scope="col">What it protects against</th><th scope="col">If missing</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Content-Security-Policy</code></td><td>Cross-site scripting (XSS) and data exfiltration via injected or compromised scripts.</td><td><span class="sev high">High</span></td></tr>
+          <tr><td><code>Strict-Transport-Security</code></td><td>HTTPS downgrade / SSL-stripping man-in-the-middle attacks.</td><td><span class="sev high">High</span></td></tr>
+          <tr><td><code>X-Frame-Options</code></td><td>Clickjacking via hidden <code>&lt;iframe&gt;</code> overlays.</td><td><span class="sev med">Medium</span></td></tr>
+          <tr><td><code>X-Content-Type-Options</code></td><td>MIME-sniffing that can execute a file as script.</td><td><span class="sev med">Medium</span></td></tr>
+          <tr><td><code>Referrer-Policy</code></td><td>Leaking full URLs (with tokens/IDs) to third parties.</td><td><span class="sev low">Low</span></td></tr>
+          <tr><td><code>Permissions-Policy</code></td><td>Unwanted access to camera, microphone, geolocation, etc.</td><td><span class="sev low">Low</span></td></tr>
+          <tr><td><code>Cross-Origin-Opener-Policy</code></td><td>Cross-origin side-channel (Spectre-class) and tab-napping attacks.</td><td><span class="sev low">Low</span></td></tr>
+          <tr><td><code>Cross-Origin-Resource-Policy</code></td><td>Cross-origin leaks of your resources.</td><td><span class="sev low">Low</span></td></tr>
+          <tr><td><code>Server</code> / <code>X-Powered-By</code></td><td>Needless disclosure of your stack and versions.</td><td><span class="sev low">Low</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>HardenCheck also reads <em>how</em> a header is configured, not just whether it exists. A CSP that allows <code class="inline">'unsafe-inline'</code>, an HSTS with a short or zero <code class="inline">max-age</code>, or an <code class="inline">X-Frame-Options</code> with a non-standard value are all flagged even though the header is technically present.</p>
+
+    <h2 id="cookies">Cookie flags</h2>
+    <p>Every <code class="inline">Set-Cookie</code> line is checked for the three flags that keep a cookie from being stolen or abused:</p>
+    <ul>
+      <li><strong>Secure</strong> — the cookie is only ever sent over HTTPS, so it can't be sniffed on an unencrypted connection.</li>
+      <li><strong>HttpOnly</strong> — the cookie is hidden from JavaScript, so a cross-site scripting bug can't read and exfiltrate your session.</li>
+      <li><strong>SameSite</strong> — the cookie isn't sent on cross-site requests (use <code class="inline">Lax</code> or <code class="inline">Strict</code>), which blocks a large class of cross-site request forgery (CSRF).</li>
+    </ul>
+    <p>HardenCheck only ever shows the cookie's <em>name</em> and its flags — never the cookie value. A cookie missing <code class="inline">Secure</code> <em>or</em> <code class="inline">HttpOnly</code> is treated as <span class="sev high">High</span>, since those are the flags that protect a session token; a cookie missing <em>both</em> is wholly exposed (interceptable on plain HTTP <em>and</em> readable by script) and is flagged <span class="sev crit">Critical</span>. Missing only <code class="inline">SameSite</code> is <span class="sev med">Medium</span>.</p>
+
+    <h2 id="grade">How the grade is calculated</h2>
+    <p>Grading is deliberately simple and transparent. Every site starts at <strong>100 points</strong>. Each issue subtracts points by severity:</p>
+    <ul>
+      <li><strong>Critical</strong> &minus;25</li>
+      <li><strong>High</strong> &minus;16</li>
+      <li><strong>Medium</strong> &minus;9</li>
+      <li><strong>Low</strong> &minus;4</li>
+    </ul>
+    <p>The remaining score maps to a letter: <strong>A</strong> (90+), <strong>B</strong> (80–89), <strong>C</strong> (65–79), <strong>D</strong> (45–64), <strong>F</strong> (below 45). The weights are heuristics chosen to reward the high-impact headers (CSP, HSTS) most — they're a useful relative signal, not an industry-standard score.</p>
+    <p><strong>Critical</strong> is reserved for the worst combinations: both CSP <em>and</em> HSTS missing at once (the two strongest controls gone together), or a cookie that sets neither <code class="inline">Secure</code> nor <code class="inline">HttpOnly</code>. A grade-F card only reports "Critical protections are missing" when one of these is actually present.</p>
+
+    <h2 id="proxy">URL mode and the CORS-proxy limitation</h2>
+    <p>Browsers enforce the same-origin policy: a page on one domain generally cannot read the response headers of another domain. To check a URL anyway, HardenCheck routes the request through a <strong>public CORS proxy</strong> that fetches your site server-side and returns the headers it saw.</p>
+    <div class="callout warn-callout">
+      <strong>Important caveat:</strong> public proxies frequently <strong>strip, rewrite, or omit</strong> response headers. That means URL mode can under-report (show a header as missing when your server actually sends it) or simply fail to return anything gradeable. When HardenCheck detects that no security headers came back, it says so plainly instead of awarding a bogus failing grade.
+    </div>
+    <p>The proxy is also a third party that can see the URL it fetches, it can be rate-limited or down, and it can't reach pages behind authentication or on a private network. For all of these reasons, paste mode is the recommended path for an accurate result.</p>
+
+    <h2 id="accurate">Getting an accurate grade</h2>
+    <p>Read your site's <em>real</em> headers and paste them in:</p>
+    <ol class="steps-list">
+      <li><strong>Use curl.</strong> Run <code class="inline">curl -I https://your-site.com</code> in a terminal. The <code class="inline">-I</code> flag fetches just the response headers. Copy the whole block.</li>
+      <li><strong>Or use DevTools.</strong> Open your site, press F12, go to the <em>Network</em> tab, reload, click the top (document) request, and copy the <em>Response Headers</em> section.</li>
+      <li><strong>Paste and grade.</strong> Switch HardenCheck to paste mode, drop the block in, and you'll get a grade based on exactly what your server sends — with no proxy in the way.</li>
+    </ol>
+
+    <h2 id="disclaimer">This is a hardening check — not a security audit</h2>
+    <div class="callout warn-callout">
+      <strong>Important:</strong> HardenCheck grades HTTP response headers and cookie flags only. <strong>It is not a security guarantee, certification, or audit.</strong> A clean A means your headers are well-configured; it does not mean your site is secure.
+    </div>
+    <p>Headers are one important layer. A real audit also considers authentication, authorization, dependency vulnerabilities, input validation, business logic, server and network configuration, and your specific threat model — none of which a header grader can see. Use HardenCheck as a fast first pass before you ship, and pair it with the rest of the <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> ship-safety suite. <strong>This is a tool, not professional security advice.</strong></p>
+
+    <h2 id="roadmap">On the roadmap</h2>
+    <div class="roadmap-note">
+      <p style="margin:0"><strong>PulseGuard — continuous header monitoring.</strong> A one-shot grade is great before launch, but headers regress: a config change or a new deploy quietly drops your CSP. PulseGuard is the paid layer we're building on this engine — scheduled re-checks on a cadence, alerts the moment a protection regresses, and a shareable status page for your header posture. <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Get early access &rarr;</a></p>
+    </div>
+
+    <p style="margin-top:30px"><a class="btn primary" href="./">Grade your headers now</a></p>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="./" aria-label="HardenCheck — homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check — not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="about.html">How it works</a>
+      <a href="https://dukotah.github.io/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://dukotah.github.io/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://dukotah.github.io/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://dukotah.github.io/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HardenCheck — check your site for missing security headers & unsafe cookies</title>
+<meta name="description" content="Grade your site's HTTP security headers and cookie flags and get an A–F report card with plain-English explanations and copy-paste fixes for nginx, Apache, Vercel & Next.js. Runs in your browser. Free, no signup.">
+<link rel="canonical" href="https://dukotah.github.io/hardencheck/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="HardenCheck — is your site missing security headers?">
+<meta property="og:description" content="Grade your site's security headers and cookie flags. Get an A–F report card, plain-English explanations, and copy-paste fixes for nginx, Apache, Vercel & Next.js — in your browser.">
+<meta property="og:url" content="https://dukotah.github.io/hardencheck/">
+<meta property="og:image" content="https://dukotah.github.io/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebApplication","name":"HardenCheck","applicationCategory":"SecurityApplication","operatingSystem":"Web","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"description":"Free client-side scanner that grades a site's HTTP security headers and cookie flags into an A–F report card with plain-English explanations and copy-paste fixes for nginx, Apache, Vercel and Next.js.","publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"}}
+</script>
+<link rel="stylesheet" href="styles.css?v=1">
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="./" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="about.html">How it works</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">Security-header &amp; cookie scanner</p>
+      <h1>Is your site missing its security headers?</h1>
+      <p class="lede">Most vibe-coded and rushed deploys ship with <strong>no Content-Security-Policy, no HSTS, and cookies anyone can steal</strong>. HardenCheck grades your response headers and cookie flags into a plain-English <strong>A–F report card</strong> — with copy-paste fixes for your platform.</p>
+
+      <form id="scan-form" class="scanner" novalidate>
+        <div class="code-tool">
+          <div class="code-toolbar">
+            <span class="tb-label">Check a live URL</span>
+            <button type="button" id="paste-toggle" class="tb-btn" aria-expanded="false" aria-controls="paste-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+              Paste raw headers instead
+            </button>
+          </div>
+
+          <div class="url-row">
+            <label class="sr-only" for="url">Your site's URL</label>
+            <span class="url-prefix" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+            </span>
+            <input id="url" name="url" class="url-input" type="url" inputmode="url" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="https://your-site.com" aria-describedby="trust-line safety-note">
+          </div>
+
+          <div id="paste-wrap" class="paste-wrap" hidden>
+            <label class="code-label" for="paste">Paste a raw HTTP response header block <code>(curl -I your-site.com)</code></label>
+            <textarea id="paste" name="paste" class="code-input" spellcheck="false" autocomplete="off" autocapitalize="off" autocorrect="off" wrap="off" placeholder="HTTP/2 200&#10;content-security-policy: default-src 'self'&#10;strict-transport-security: max-age=63072000&#10;set-cookie: session=...; HttpOnly; Secure; SameSite=Lax&#10;&hellip;"></textarea>
+          </div>
+        </div>
+
+        <p class="safety-note" id="safety-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+          <span><strong>URL mode reads response headers through a public CORS proxy</strong>, which can strip or hide them. If that happens, paste mode always works — and is the most accurate. Only check sites you own or are authorized to test.</span>
+        </p>
+
+        <div class="scan-actions">
+          <button type="submit" id="scan-btn" class="btn primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+            Grade my headers
+          </button>
+          <button type="button" id="example-btn" class="btn">Try an example</button>
+          <button type="button" id="clear-btn" class="btn ghost">Clear</button>
+        </div>
+
+        <p class="trust-badge" id="trust-line">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+          <span><strong>Runs in your browser.</strong> We don't store your URL, headers, or results. No signup.</span>
+        </p>
+      </form>
+    </div>
+  </section>
+
+  <section id="results" class="results" hidden tabindex="-1" aria-label="Report card and findings">
+    <!-- app.js fills this with the grade report card, findings, and fixes -->
+  </section>
+
+  <section class="detect">
+    <div class="wrap">
+      <p class="eyebrow">What we check</p>
+      <h2 class="detect-title">The headers that actually protect users</h2>
+      <p class="detect-sub">HardenCheck grades the response headers and cookie flags every site should set — and explains, in plain English, what each one stops and exactly how to add it.</p>
+      <ul class="detect-grid">
+        <li class="feature"><span class="feat-icon" aria-hidden="true">CSP</span><div><h3>Content-Security-Policy</h3><p>Your strongest defence against cross-site scripting. We flag missing or <code>'unsafe-inline'</code> policies.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">HSTS</span><div><h3>Strict-Transport-Security</h3><p>Forces HTTPS so attackers can't downgrade the connection. We check <code>max-age</code> and scope.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">XFO</span><div><h3>X-Frame-Options</h3><p>Blocks clickjacking by stopping your pages being framed. Also reads CSP <code>frame-ancestors</code>.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">MIME</span><div><h3>X-Content-Type-Options</h3><p>Stops MIME-sniffing that can turn a file into runnable script. We check for <code>nosniff</code>.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">REF</span><div><h3>Referrer-Policy &amp; Permissions-Policy</h3><p>Limit what you leak in the <code>Referer</code> header and switch off camera/mic/geolocation you don't use.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">COOP</span><div><h3>Cross-Origin-* headers</h3><p>COOP, COEP-adjacent CORP isolation that mitigates Spectre-class and cross-origin leaks.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">🍪</span><div><h3>Cookie flags</h3><p>Every <code>Set-Cookie</code> is checked for <code>Secure</code>, <code>HttpOnly</code> and <code>SameSite</code> — the flags that keep sessions un-stealable.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">ℹ</span><div><h3>Info disclosure</h3><p>We flag <code>Server</code> and <code>X-Powered-By</code> headers that needlessly advertise your stack to attackers.</p></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="steps">
+    <div class="wrap">
+      <p class="eyebrow">How it works</p>
+      <h2 class="steps-title">Three steps to a hardened header set</h2>
+      <ol class="step-grid">
+        <li class="step">
+          <span class="step-num" aria-hidden="true">1</span>
+          <h3>Enter your URL or paste headers</h3>
+          <p>Drop in a site you own, or paste a raw response block from <code>curl -I</code> or DevTools to skip the network entirely.</p>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">2</span>
+          <h3>Graded in your browser</h3>
+          <p>Each header and cookie is scored by severity and turned into an A–F report card — all locally, nothing stored.</p>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">3</span>
+          <h3>Copy the exact fix</h3>
+          <p>Every issue comes with a ready-to-paste snippet for nginx, Apache, Vercel, or Next.js. Paste, deploy, re-check.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="suite-band">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">The ship-safety suite</p>
+        <h2>Checks before you ship</h2>
+        <p>HardenCheck is part of <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a>' ship-safety suite for vibe-coded and indie apps. Run them all before you go live.</p>
+      </div>
+      <ul class="suite-grid">
+        <li class="suite-card">
+          <span class="feat-icon" aria-hidden="true">src</span>
+          <h3 class="suite-name">LeakCheck</h3>
+          <p>Did you leak a secret in your <strong>source code</strong>? Paste code, <code>.env</code>, or config and catch hardcoded keys before you commit.</p>
+          <a class="suite-cta" href="https://dukotah.github.io/leakcheck/" target="_blank" rel="noopener noreferrer">Scan your source code &rarr;</a>
+        </li>
+        <li class="suite-card">
+          <span class="feat-icon" aria-hidden="true">live</span>
+          <h3 class="suite-name">ExposureCheck</h3>
+          <p>Is your <strong>live site</strong> leaking? Probe the deployed URL for exposed <code>.env</code>, public <code>.git</code>, source maps, and bundled keys.</p>
+          <a class="suite-cta" href="https://dukotah.github.io/exposurecheck/" target="_blank" rel="noopener noreferrer">Scan your live site &rarr;</a>
+        </li>
+        <li class="suite-card is-current" aria-current="page">
+          <span class="feat-icon" aria-hidden="true">hdr</span>
+          <h3 class="suite-name">HardenCheck <span class="pill">You're here</span></h3>
+          <p>Are your <strong>security headers</strong> set? Grade your CSP, HSTS, frame &amp; cookie protections into an A–F report card.</p>
+          <span class="suite-cta muted">This tool</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="faq">
+    <div class="wrap narrow">
+      <p class="eyebrow">FAQ</p>
+      <h2 class="faq-title">Questions, answered</h2>
+
+      <details>
+        <summary>How does it read headers from another site in my browser?</summary>
+        <p>Browsers block one site from reading another's response (the same-origin policy), so URL mode routes the request through a <strong>public CORS proxy</strong> that fetches your page and hands the headers back to your tab. That proxy is a third party that can see the URL it fetches, and — importantly — <strong>proxies often strip or rewrite headers</strong>, which can hide or distort the very thing we're grading. When that happens HardenCheck tells you honestly instead of guessing. For a guaranteed-accurate grade, use <strong>paste mode</strong>.</p>
+      </details>
+
+      <details>
+        <summary>What's the most accurate way to use it?</summary>
+        <p><strong>Paste mode.</strong> Run <code>curl -I https://your-site.com</code> in a terminal, or open your site, press F12, go to the Network tab, click the document request, and copy the <em>Response Headers</em>. Paste that raw block in and HardenCheck grades the real headers your server sends — with no network call at all from this page.</p>
+      </details>
+
+      <details>
+        <summary>Do you store my URL or headers?</summary>
+        <p>No. Nothing is persisted. Your URL, the fetched or pasted headers, and the resulting grade live only in this tab's memory and disappear the moment you close or reload the page. There's no database, no analytics on your content, and no signup. (In URL mode the public CORS proxy briefly handles your URL to fetch it — see above.)</p>
+      </details>
+
+      <details>
+        <summary>Is a good grade a guarantee my site is secure?</summary>
+        <p><strong>No.</strong> HardenCheck grades HTTP response headers and cookie flags — an important but narrow slice of security. A clean A says your headers are well-configured; it says nothing about your authentication, dependencies, input validation, access controls, or server hardening. Treat it as a fast hardening check, not a full audit. For real assurance, <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">talk to Copper Bay Labs</a>.</p>
+      </details>
+
+      <details>
+        <summary>Can it monitor my headers over time?</summary>
+        <p>HardenCheck is a one-shot check. Continuous, scheduled monitoring — re-checking your headers on a cadence and alerting you the moment a deploy regresses a protection, with a shareable status page — is the job of <strong>PulseGuard</strong>, the paid monitoring layer we're building on top of this engine. Want early access for your team? <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Get in touch &rarr;</a></p>
+      </details>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="./" aria-label="HardenCheck — homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check — not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="about.html">How it works</a>
+      <a href="https://dukotah.github.io/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://dukotah.github.io/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://dukotah.github.io/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://dukotah.github.io/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+<script src="app.js?v=1"></script>
+</body>
+</html>
