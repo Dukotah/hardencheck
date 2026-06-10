@@ -823,6 +823,45 @@
   /* ================================================================== *
    * Render the full report: the grade card (hero), the findings, fixes.
    * ================================================================== */
+  /* Contextual lead capture: when header/cookie issues are found, offer a
+   * pre-filled "get these fixed" quote to Copper Bay Tech with the grade,
+   * COUNTS, and issue TITLES only — all already non-sensitive. */
+  function buildFixCta(issues, graded, target) {
+    var seenType = Object.create(null), types = [];
+    for (var i = 0; i < issues.length; i++) {
+      var nm = issues[i].title;
+      if (nm && !seenType[nm]) { seenType[nm] = true; types.push(nm); }
+    }
+    var counts = graded.counts, sevParts = [];
+    for (var s = 0; s < ISSUE_SEVERITIES.length; s++) {
+      if (counts[ISSUE_SEVERITIES[s]]) sevParts.push(counts[ISSUE_SEVERITIES[s]] + " " + SEV_LABEL[ISSUE_SEVERITIES[s]].toLowerCase());
+    }
+    var typeList = types.slice(0, 8).map(function (t) { return "- " + t; }).join("\n");
+    var total = issues.length;
+    var subject = "Fix quote — HardenCheck graded my site " + graded.grade +
+      " (" + total + (total === 1 ? " header issue" : " header issues") + ")";
+    var body = "Hi Copper Bay,\n\nI ran HardenCheck on " + (target || "my site") +
+      " — grade " + graded.grade + " (" + graded.score + "/100) with " + total +
+      (total === 1 ? " issue" : " issues") +
+      (sevParts.length ? " (" + sevParts.join(", ") + ")" : "") +
+      (typeList ? ", including:\n" + typeList : ".") +
+      "\n\nI'd like a no-obligation quote to harden my response headers and cookies. Thanks!";
+    var href = "mailto:contact@copperbaytech.com?subject=" + encodeURIComponent(subject) +
+      "&body=" + encodeURIComponent(body);
+    var cta = el("div", "fix-cta");
+    cta.setAttribute("style", "display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:18px 0 6px;padding:16px 18px;border:1px solid var(--copper,#bf6b3c);background:var(--copper-tint,#f6ebe2);border-radius:12px");
+    var copy = el("div"); copy.setAttribute("style", "max-width:48ch");
+    var strong = el("strong", null, "Want these fixed for you?");
+    strong.setAttribute("style", "display:block;margin-bottom:3px");
+    var sub = el("span", null, "Copper Bay Tech configures security headers and cookie flags the right way. Get a no-obligation quote — your report card is pre-filled in the email.");
+    sub.setAttribute("style", "color:var(--muted,#665f54);font-size:14px");
+    copy.appendChild(strong); copy.appendChild(sub);
+    var btn = el("a", "btn primary", "Get a free fix quote →");
+    btn.setAttribute("href", href); btn.setAttribute("style", "white-space:nowrap");
+    cta.appendChild(copy); cta.appendChild(btn);
+    return cta;
+  }
+
   function render(graded, meta, results, liveRegion, ctx) {
     results.textContent = "";
 
@@ -853,6 +892,7 @@
         for (var c = 0; c < group.length; c++) wrap.appendChild(buildCard(group[c], ctx));
         results.appendChild(wrap);
       }
+      results.appendChild(buildFixCta(issues, graded, meta && meta.target));
     }
 
     if (passes.length) {
