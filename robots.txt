@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://dukotah.github.io/hardencheck/sitemap.xml
+Sitemap: https://labs.copperbaytech.com/hardencheck/sitemap.xml
