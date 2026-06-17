@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HardenCheck — check your site for missing security headers & unsafe cookies</title>
-<meta name="description" content="Grade your site's HTTP security headers and cookie flags and get an A–F report card with plain-English explanations and copy-paste fixes for nginx, Apache, Vercel & Next.js. Runs in your browser. Free, no signup.">
+<title>HardenCheck — check your site for missing security headers &amp; unsafe cookies</title>
+<meta name="description" content="Grade your site's HTTP security headers and cookie flags and get an A–F report card with plain-English explanations and copy-paste fixes for nginx, Apache, Vercel &amp; Next.js. Runs in your browser. Free, no signup.">
 <link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="HardenCheck">
 <meta property="og:title" content="HardenCheck — is your site missing security headers?">
-<meta property="og:description" content="Grade your site's security headers and cookie flags. Get an A–F report card, plain-English explanations, and copy-paste fixes for nginx, Apache, Vercel & Next.js — in your browser.">
+<meta property="og:description" content="Grade your site's security headers and cookie flags. Get an A–F report card, plain-English explanations, and copy-paste fixes for nginx, Apache, Vercel &amp; Next.js — in your browser.">
 <meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/">
 <meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
 <meta property="og:image:width" content="1200">
@@ -43,6 +43,7 @@
     </a>
     <nav class="nav" aria-label="Primary navigation">
       <a href="about.html">How it works</a>
+      <a href="guides/add-content-security-policy-header.html">Fix guides</a>
     </nav>
   </div>
 </header>
@@ -111,14 +112,14 @@
       <h2 class="detect-title">The headers that actually protect users</h2>
       <p class="detect-sub">HardenCheck grades the response headers and cookie flags every site should set — and explains, in plain English, what each one stops and exactly how to add it.</p>
       <ul class="detect-grid">
-        <li class="feature"><span class="feat-icon" aria-hidden="true">CSP</span><div><h3>Content-Security-Policy</h3><p>Your strongest defence against cross-site scripting. We flag missing or <code>'unsafe-inline'</code> policies.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">CSP</span><div><h3>Content-Security-Policy</h3><p>Your strongest defence against cross-site scripting. We flag missing or <code>'unsafe-inline'</code> policies. <a href="guides/add-content-security-policy-header.html">How to add one &rarr;</a></p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">HSTS</span><div><h3>Strict-Transport-Security</h3><p>Forces HTTPS so attackers can't downgrade the connection. We check <code>max-age</code> and scope.</p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">XFO</span><div><h3>X-Frame-Options</h3><p>Blocks clickjacking by stopping your pages being framed. Also reads CSP <code>frame-ancestors</code>.</p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">MIME</span><div><h3>X-Content-Type-Options</h3><p>Stops MIME-sniffing that can turn a file into runnable script. We check for <code>nosniff</code>.</p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">REF</span><div><h3>Referrer-Policy &amp; Permissions-Policy</h3><p>Limit what you leak in the <code>Referer</code> header and switch off camera/mic/geolocation you don't use.</p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">COOP</span><div><h3>Cross-Origin-* headers</h3><p>COOP, COEP-adjacent CORP isolation that mitigates Spectre-class and cross-origin leaks.</p></div></li>
-        <li class="feature"><span class="feat-icon" aria-hidden="true">🍪</span><div><h3>Cookie flags</h3><p>Every <code>Set-Cookie</code> is checked for <code>Secure</code>, <code>HttpOnly</code> and <code>SameSite</code> — the flags that keep sessions un-stealable.</p></div></li>
-        <li class="feature"><span class="feat-icon" aria-hidden="true">ℹ</span><div><h3>Info disclosure</h3><p>We flag <code>Server</code> and <code>X-Powered-By</code> headers that needlessly advertise your stack to attackers.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">&#x1F36A;</span><div><h3>Cookie flags</h3><p>Every <code>Set-Cookie</code> is checked for <code>Secure</code>, <code>HttpOnly</code> and <code>SameSite</code> — the flags that keep sessions un-stealable.</p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">&#x2139;</span><div><h3>Info disclosure</h3><p>We flag <code>Server</code> and <code>X-Powered-By</code> headers that needlessly advertise your stack to attackers.</p></div></li>
       </ul>
     </div>
   </section>
@@ -239,6 +240,7 @@
     </div>
     <nav class="foot-nav" aria-label="Footer navigation">
       <a href="about.html">How it works</a>
+      <a href="guides/add-content-security-policy-header.html">Fix guides</a>
       <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
       <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
       <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
