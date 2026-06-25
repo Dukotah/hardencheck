@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Enable the HSTS Header (Strict-Transport-Security)</title>
+<meta name="description" content="Your site is missing a Strict-Transport-Security header. This guide explains what HSTS does, how to set max-age safely, when to add includeSubDomains and preload, and exact deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/enable-hsts-header.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How to Enable the HSTS Header (Strict-Transport-Security)">
+<meta property="og:description" content="Your site is missing a Strict-Transport-Security header. This guide explains what HSTS does, how to set max-age safely, when to add includeSubDomains and preload, and exact deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/enable-hsts-header.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How to Enable the HSTS Header (Strict-Transport-Security)","description":"Complete guide to deploying a Strict-Transport-Security header safely: choosing the right max-age, deciding whether to add includeSubDomains and preload, and platform-specific deployment snippets for nginx, Apache, Vercel, Next.js, Netlify, and Cloudflare Pages.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-06-25","dateModified":"2026-06-25","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/enable-hsts-header.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What happens if my TLS certificate expires while HSTS is active?","acceptedAnswer":{"@type":"Answer","text":"The browser will show a hard certificate error — not a bypass-able warning, and not a fallback to HTTP. This is correct behaviour: HSTS is designed to prevent HTTP fallback. The fix is to renew your certificate. Most platforms (Vercel, Netlify, Cloudflare, GitHub Pages) auto-renew Let's Encrypt certificates. On a self-managed server, set up a cron job for certbot renew."}},{"@type":"Question","name":"Can I remove HSTS? What does max-age=0 do?","acceptedAnswer":{"@type":"Answer","text":"Serving Strict-Transport-Security: max-age=0 over HTTPS clears the cached directive in browsers that receive it. But this must arrive over HTTPS — if you've lost HTTPS access entirely, you can't send the opt-out and users with a cached HSTS entry are stuck until the original max-age expires. This is why testing with max-age=300 first matters. If you're on the preload list, max-age=0 alone won't remove you — you must submit a removal request at hstspreload.org and wait 3–6 months."}},{"@type":"Question","name":"Does HSTS protect against all man-in-the-middle attacks?","acceptedAnswer":{"@type":"Answer","text":"HSTS eliminates HTTP-downgrade (SSL stripping) attacks by ensuring all connections use HTTPS. But if an attacker can obtain a valid certificate for your domain through a compromised certificate authority, they can still intercept HTTPS traffic. A CAA DNS record limits which CAs can issue for your domain, and Certificate Transparency logs make unauthorised certificates detectable. HSTS preloading reduces the first-visit window further."}},{"@type":"Question","name":"What's the difference between HSTS and HTTPS?","acceptedAnswer":{"@type":"Answer","text":"HTTPS is the encrypted transport protocol (TLS) that protects data as it travels between browser and server. HSTS is a response header that tells the browser to enforce HTTPS — removing the ability to make an HTTP connection to the domain even if the user types http://. You need both: HTTPS does the encryption; HSTS ensures the browser never bypasses it."}},{"@type":"Question","name":"Does includeSubDomains affect my staging or API subdomains?","acceptedAnswer":{"@type":"Answer","text":"Yes — every subdomain including staging.yoursite.com, api.yoursite.com, and CI preview URLs on your root domain must serve valid HTTPS before you add includeSubDomains. Many teams handle this by running staging on a separate domain or using a platform subdomain for deploy previews (Netlify's *.netlify.app, Vercel's *.vercel.app) which are not affected by your domain's HSTS policy."}},{"@type":"Question","name":"Is there a downside to a very long max-age?","acceptedAnswer":{"@type":"Answer","text":"The tradeoff is recovery time. With a one-year max-age, any browser that visited in the last year will enforce HTTPS for up to another year after the header is removed — you can't reach those browsers to send a max-age=0 opt-out until they visit again. For production sites that will remain on HTTPS permanently, one year (31536000) is the right choice. For active experiments, start with max-age=300 and escalate."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Remediation guide</p>
+    <h1>How to Enable the HSTS Header (Strict-Transport-Security)</h1>
+    <p class="lede">HardenCheck flagged your site for a missing or weak <code class="inline">Strict-Transport-Security</code> header. This guide explains what HSTS does that an HTTPS redirect can't, walks you through the four-step deployment process — including the critical warnings about <code class="inline">includeSubDomains</code> and <code class="inline">preload</code> — and gives you the exact snippet for every major hosting platform.</p>
+
+    <div class="callout warn-callout">
+      <strong>Read before you add <code class="inline">preload</code>.</strong> The HSTS preload list is very hard to undo — removal takes 3&ndash;6 months and cannot be expedited. Read the <a href="#preload" style="color:inherit;font-weight:600">preload section</a> in full before adding that directive.
+    </div>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#why-hsts">Why HSTS matters</a></li>
+      <li><a href="#anatomy">The header explained</a></li>
+      <li><a href="#step1">Step 1: Test with short max-age</a></li>
+      <li><a href="#step2">Step 2: Set one year</a></li>
+      <li><a href="#step3">Step 3: includeSubDomains</a></li>
+      <li><a href="#preload">Step 4: Preload (read first)</a></li>
+      <li><a href="#platform">Deploy on your platform</a></li>
+      <li><a href="#limits">What HSTS doesn't cover</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="why-hsts">What HSTS does &mdash; and why an HTTPS redirect alone isn&rsquo;t enough</h2>
+    <p>When a user types <code class="inline">yoursite.com</code> into a browser, the first request goes out over HTTP &mdash; not HTTPS. The browser has no way to know HTTPS exists until it makes that initial connection and your server responds. An attacker sitting between the user and your server (on shared Wi-Fi, a corporate proxy, or a compromised router) can intercept that unencrypted first request and respond themselves, serving a fake version of your site while the real HTTPS connection never happens. This attack is called <strong>SSL stripping</strong>, and the tool that demonstrated it publicly &mdash; sslstrip &mdash; still works on any site that relies on HTTP&rarr;HTTPS redirects alone.</p>
+    <p>A redirect from <code class="inline">http://yoursite.com</code> to <code class="inline">https://yoursite.com</code> does not fix this. The redirect response itself travels over the unencrypted HTTP connection and can be intercepted and suppressed &mdash; the browser never gets told to switch.</p>
+    <p><code class="inline">Strict-Transport-Security</code> fixes the problem at the browser level. The first time a user visits your HTTPS site with an HSTS header present, the browser records the directive and refuses to make HTTP connections to that domain for the duration of <code class="inline">max-age</code>. Every subsequent visit &mdash; even if the user manually types <code class="inline">http://</code> &mdash; is automatically upgraded to HTTPS before any network packet leaves the device. There is no unencrypted request for an attacker to intercept.</p>
+
+    <h2 id="anatomy">The header and what each part means</h2>
+    <p>The full production HSTS header looks like this:</p>
+    <pre><code>Strict-Transport-Security: max-age=31536000; includeSubDomains; preload</code></pre>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Directive</th><th>What it does</th><th>Required?</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">max-age=N</code></td>
+          <td>How many seconds the browser remembers and enforces HSTS after the last time it received this header. 31,536,000 = one year.</td>
+          <td>Yes</td>
+        </tr>
+        <tr>
+          <td><code class="inline">includeSubDomains</code></td>
+          <td>Extends the policy to every subdomain of your domain (<code class="inline">api.</code>, <code class="inline">staging.</code>, etc.). Only safe when all subdomains serve HTTPS. See Step&nbsp;3.</td>
+          <td>No (recommended)</td>
+        </tr>
+        <tr>
+          <td><code class="inline">preload</code></td>
+          <td>Marks the domain for submission to the browser preload list &mdash; baking HSTS in before any first visit. Requires <code class="inline">includeSubDomains</code> and <code class="inline">max-age&nbsp;&ge;&nbsp;31536000</code>. Very hard to undo. See Step&nbsp;4.</td>
+          <td>No</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Start with just <code class="inline">max-age</code>. Add the other directives only after you understand their implications.</p>
+
+    <h2 id="step1">Step 1: Test with a short max-age first</h2>
+    <p>Before committing to a long HSTS window, deploy the header with a 5-minute max-age. This keeps any mistake quickly reversible:</p>
+    <pre><code>Strict-Transport-Security: max-age=300</code></pre>
+    <p>With this in place, verify over the next few days that:</p>
+    <ul>
+      <li>Every page, asset, font, and API endpoint loads over HTTPS</li>
+      <li>HTTP&rarr;HTTPS redirects work correctly on your platform</li>
+      <li>Your browser console shows no mixed-content warnings (resources loading over HTTP on an HTTPS page)</li>
+      <li>Every subdomain you use is accessible over HTTPS (important before Step&nbsp;3)</li>
+    </ul>
+    <p>If something breaks, the 5-minute window means the fix doesn&rsquo;t require clearing browser state across your entire user base. Once everything checks out, proceed to Step&nbsp;2.</p>
+
+    <h2 id="step2">Step 2: Set max-age to one year</h2>
+    <p>Once verified, raise <code class="inline">max-age</code> to 31,536,000 &mdash; one year. This is the value HardenCheck and the majority of security scanners require for a passing grade:</p>
+    <pre><code>Strict-Transport-Security: max-age=31536000</code></pre>
+    <p>The timer refreshes on every visit. A user who visits regularly has a rolling one-year window &mdash; the countdown only starts from their most recent visit. Users who visited once and never returned will stop enforcing HSTS after one year has passed.</p>
+
+    <div class="callout tip-callout">
+      <strong>Common values.</strong> 300 (5&nbsp;min &mdash; testing) &rarr; 86,400 (1&nbsp;day &mdash; cautious) &rarr; 2,592,000 (30&nbsp;days &mdash; staging) &rarr; 31,536,000 (1&nbsp;year &mdash; recommended production). There is no benefit to going higher; most scanners cap the recognised value at one year.
+    </div>
+
+    <h2 id="step3">Step 3: Decide about <code class="inline">includeSubDomains</code></h2>
+    <p><code class="inline">includeSubDomains</code> extends HSTS to every subdomain under your domain. This closes a real gap: without it, an attacker can serve content on a subdomain over HTTP and potentially capture session cookies that were not scoped correctly to the root domain alone.</p>
+    <p><strong>Before you add it, audit every subdomain you use:</strong></p>
+    <ul>
+      <li><code class="inline">api.yoursite.com</code> &mdash; serving over HTTPS?</li>
+      <li><code class="inline">staging.yoursite.com</code> &mdash; serving over HTTPS?</li>
+      <li><code class="inline">cdn.yoursite.com</code> or any asset subdomain &mdash; HTTPS?</li>
+      <li>Any CI preview URLs built on your root domain?</li>
+      <li>Any legacy subdomains still on HTTP?</li>
+    </ul>
+    <p>If any subdomain is HTTP-only &mdash; even an internal or rarely-used one &mdash; adding <code class="inline">includeSubDomains</code> will lock browsers out of it. They will refuse the HTTP connection, the HTTPS version may not exist, and users get a hard error with no fallback or workaround.</p>
+    <p>Many teams solve this by running staging environments on a separate domain (e.g.&nbsp;<code class="inline">yoursite-staging.com</code>) or using the hosting platform&rsquo;s own subdomain for deploy previews &mdash; Netlify&rsquo;s <code class="inline">*.netlify.app</code> and Vercel&rsquo;s <code class="inline">*.vercel.app</code> preview URLs are under those platforms&rsquo; domains, not yours, and are therefore unaffected by your HSTS policy.</p>
+    <p>Once all subdomains are HTTPS-ready:</p>
+    <pre><code>Strict-Transport-Security: max-age=31536000; includeSubDomains</code></pre>
+
+    <h2 id="preload">Step 4: Understand preload before you use it</h2>
+    <p>The HSTS preload list is a database maintained by Google and shipped inside Chrome, Firefox, Safari, and Edge. Domains on the list have HSTS enforced from the very first connection &mdash; even before the browser has ever visited the site and received a header. This closes the remaining gap: a brand-new visitor has no HSTS entry cached, and that first visit is still vulnerable to SSL stripping. The preload list eliminates that window entirely.</p>
+    <p><strong>Requirements for preload list submission (verified at <a href="https://hstspreload.org" target="_blank" rel="noopener noreferrer">hstspreload.org</a>):</strong></p>
+    <ul>
+      <li>A valid TLS certificate on the HTTPS site</li>
+      <li>HTTP&rarr;HTTPS redirect on port 80</li>
+      <li>An HSTS header on the HTTPS response with <code class="inline">max-age</code> of at least 31,536,000</li>
+      <li><code class="inline">includeSubDomains</code> must be present</li>
+      <li><code class="inline">preload</code> must be present</li>
+    </ul>
+    <p>If you meet all requirements, submit the domain at hstspreload.org. Acceptance typically takes a few weeks; browser adoption varies by release cycle.</p>
+
+    <div class="callout warn-callout">
+      <strong>Preload is very hard to undo.</strong> Once your domain is on the preload list, it is compiled into every copy of Chrome, Firefox, Safari, and Edge worldwide. Requesting removal is free but takes <strong>3&ndash;6 months</strong> to propagate through browser releases. During that window, anyone using an up-to-date browser will have HSTS enforced on your domain regardless of what headers you serve. If you lose HTTPS access (expired certificate, misconfiguration, server failure) during that period, users get a hard error with no HTTP fallback and no workaround. Only add <code class="inline">preload</code> if you are committed to this domain being on HTTPS permanently.
+    </div>
+
+    <p>The full preload-ready header:</p>
+    <pre><code>Strict-Transport-Security: max-age=31536000; includeSubDomains; preload</code></pre>
+
+    <h2 id="platform">Deploy it on your platform</h2>
+
+    <h3>nginx</h3>
+    <pre><code>add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>&lt;IfModule mod_headers.c&gt;
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+&lt;/IfModule&gt;</code></pre>
+
+    <h3>Vercel (vercel.json)</h3>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000; includeSubDomains"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>const securityHeaders = [
+  {
+    key: 'Strict-Transport-Security',
+    value: 'max-age=31536000; includeSubDomains'
+  }
+];
+
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
+};</code></pre>
+
+    <h3>Netlify (_headers file)</h3>
+    <pre><code>/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains</code></pre>
+
+    <h3>Cloudflare Pages (_headers file)</h3>
+    <pre><code>/*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>GitHub Pages note.</strong> GitHub Pages automatically sets HSTS on custom domains when you enable &ldquo;Enforce HTTPS&rdquo; in the Pages settings panel. You do not need to add it manually &mdash; but run HardenCheck in paste mode to confirm the <code class="inline">max-age</code> value GitHub is currently setting meets the minimum recommended threshold.
+    </div>
+
+    <h2 id="limits">What HSTS doesn&rsquo;t cover</h2>
+    <p>HSTS forces the connection to use HTTPS; it does not make HTTPS itself stronger. If your TLS certificate has expired, uses a deprecated cipher suite, or is issued by an untrusted certificate authority, HSTS won&rsquo;t help &mdash; and it correctly won&rsquo;t fall back to HTTP either. The browser shows a hard certificate error instead. This is the right behaviour (falling back to HTTP is precisely what HSTS prevents), but it means you need to keep your certificate valid independently of HSTS being set. Most managed hosting platforms handle certificate renewal automatically; on a self-managed server, <code class="inline">certbot renew</code> in a daily cron job handles it.</p>
+    <p>HSTS also does not protect the content of your pages once the encrypted connection is established. Cross-site scripting, resource injection, and clickjacking are separate threats that a <code class="inline">Content-Security-Policy</code> header addresses. The two headers are complementary: HSTS secures the transport; CSP secures what executes inside it. <a href="add-content-security-policy-header.html">See the CSP guide &rarr;</a></p>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>Once you&rsquo;ve deployed your HSTS header &mdash; or while you&rsquo;re still testing with a short max-age &mdash; paste your raw response headers into HardenCheck. It checks whether <code class="inline">Strict-Transport-Security</code> is present, whether <code class="inline">max-age</code> meets the recommended minimum, and whether <code class="inline">includeSubDomains</code> is set. You can iterate on the value by editing it directly in the paste box and watching the grade update in real time, without touching your server.</p>
+
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Grade my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>What happens if my TLS certificate expires while HSTS is active?</summary>
+        <p>The browser shows a hard certificate error &mdash; not a &ldquo;proceed anyway&rdquo; prompt, and not a fallback to HTTP. This is correct: HSTS exists specifically to prevent HTTP fallback. The answer is to renew your certificate, not to remove HSTS. Most hosting platforms (Vercel, Netlify, Cloudflare, GitHub Pages) renew Let&rsquo;s Encrypt certificates automatically. On a self-managed server, <code class="inline">certbot renew</code> in a daily cron job handles this. The important takeaway: keep your certificate in good standing independently of whether HSTS is set.</p>
+      </details>
+      <details>
+        <summary>Can I remove HSTS? What does <code class="inline">max-age=0</code> do?</summary>
+        <p>Serving <code class="inline">Strict-Transport-Security: max-age=0</code> over HTTPS clears the cached directive in any browser that receives it. But this header must arrive over HTTPS &mdash; if you&rsquo;ve lost HTTPS access entirely, you cannot serve the opt-out and users with a cached entry are stuck until the original <code class="inline">max-age</code> expires. This is why testing with <code class="inline">max-age=300</code> first matters so much: a 5-minute window means any early mistake self-corrects quickly. If you are on the preload list, <code class="inline">max-age=0</code> alone will not remove you &mdash; you must submit a removal request at hstspreload.org and wait for the browser release cycle to propagate it, typically 3&ndash;6 months.</p>
+      </details>
+      <details>
+        <summary>Does HSTS protect against all man-in-the-middle attacks?</summary>
+        <p>HSTS eliminates HTTP-downgrade attacks (SSL stripping) by ensuring all connections use HTTPS. But HTTPS itself relies on certificate infrastructure: if an attacker can obtain a valid certificate for your domain through a compromised certificate authority, they can still intercept HTTPS traffic. A <strong>CAA DNS record</strong> restricts which CAs are allowed to issue certificates for your domain, and <strong>Certificate Transparency logs</strong> make unauthorised certificates publicly detectable within hours. HSTS preloading reduces the first-visit window further. None of these measures replaces well-managed certificate and key infrastructure, but together they significantly narrow the remaining attack surface.</p>
+      </details>
+      <details>
+        <summary>What&rsquo;s the difference between HSTS and HTTPS?</summary>
+        <p>HTTPS is the encrypted transport protocol (TLS) that protects data as it travels between browser and server &mdash; it&rsquo;s what makes the connection private and tamper-evident. HSTS is a response header that tells the browser to always enforce HTTPS, removing the ability to make an HTTP connection to the domain even if the user manually types <code class="inline">http://</code>. You need both: HTTPS does the encryption; HSTS ensures the browser never accidentally bypasses it.</p>
+      </details>
+      <details>
+        <summary>Does <code class="inline">includeSubDomains</code> affect my staging or API subdomains?</summary>
+        <p>Yes &mdash; every subdomain of your domain, including <code class="inline">staging.yoursite.com</code>, <code class="inline">api.yoursite.com</code>, and any CI preview URLs built on your root domain, must serve valid HTTPS before you add <code class="inline">includeSubDomains</code>. Many teams handle this by running staging on a separate domain entirely (e.g.&nbsp;<code class="inline">yoursite-staging.com</code>) or using a platform subdomain for deploy previews &mdash; Netlify&rsquo;s <code class="inline">deploy-preview--xyz.netlify.app</code> URLs and Vercel preview URLs on <code class="inline">*.vercel.app</code> are under those platforms&rsquo; own domains, not yours, so they are not affected by your HSTS policy.</p>
+      </details>
+      <details>
+        <summary>Is there a downside to a very long <code class="inline">max-age</code>?</summary>
+        <p>The tradeoff is recovery time. With a one-year <code class="inline">max-age</code>, any browser that visited your site in the past year will continue enforcing HTTPS for up to another year after you remove the header &mdash; you cannot reach those browsers to send a <code class="inline">max-age=0</code> opt-out until they visit again. For production sites that will remain on HTTPS permanently (which is almost all of them) this is the right choice. For a site you are actively experimenting with, start with <code class="inline">max-age=300</code>, verify everything works over several days, then escalate to a year.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p>HSTS secures your transport layer &mdash; these tools and guides cover the rest:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Post-deploy</span>
+        <span class="s-name">ExposureCheck</span>
+        <p>Scan your live URL for exposed <code class="inline">.env</code> files, <code class="inline">.git</code> directories, source maps, and bundled secrets.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Dependency risk</span>
+        <span class="s-name">DepCheck</span>
+        <p>Paste your <code class="inline">package.json</code> and see vulnerable, abandoned, typosquatted, and risky-license packages flagged by severity.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">ADA &amp; privacy</span>
+        <span class="s-name">ShipSafe</span>
+        <p>Check your site for WCAG accessibility failures and privacy-risk patterns before they become liabilities.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
