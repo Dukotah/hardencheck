@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X-Frame-Options vs CSP frame-ancestors: Which Do You Need?</title>
+<meta name="description" content="Your scanner flagged both X-Frame-Options and a missing CSP frame-ancestors directive. This guide explains what each one does, how browser precedence works when both are set, and the exact snippets to add to nginx, Apache, Vercel, and Netlify.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/x-frame-options-vs-csp-frame-ancestors.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="X-Frame-Options vs CSP frame-ancestors: Which Do You Need?">
+<meta property="og:description" content="Your scanner flagged both X-Frame-Options and a missing CSP frame-ancestors directive. This guide explains what each one does, how browser precedence works when both are set, and the exact snippets for every major hosting platform.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/x-frame-options-vs-csp-frame-ancestors.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"X-Frame-Options vs CSP frame-ancestors: Which Do You Need?","description":"Complete guide to clickjacking protection: what X-Frame-Options and CSP frame-ancestors each do, how browser precedence works when both headers are present, when ALLOW-FROM stopped working, and deployment snippets for nginx, Apache, Vercel, Next.js, Netlify, and Cloudflare Pages.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-07-01","dateModified":"2026-07-01","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/x-frame-options-vs-csp-frame-ancestors.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does X-Frame-Options still work in modern browsers?","acceptedAnswer":{"@type":"Answer","text":"Yes — Chrome, Firefox, Edge, and Safari all still respect X-Frame-Options. But when a Content-Security-Policy with a frame-ancestors directive is also present in the same response, modern browsers use frame-ancestors and ignore X-Frame-Options. This means XFO still works as a fallback for browsers that don't support CSP (primarily Internet Explorer), but frame-ancestors is the primary enforcement mechanism in every current browser."}},{"@type":"Question","name":"Can I use X-Frame-Options ALLOW-FROM to whitelist a specific embedding site?","acceptedAnswer":{"@type":"Answer","text":"No, not reliably. ALLOW-FROM was removed from the spec and is unsupported in Chrome, Edge, and Safari — they treat any ALLOW-FROM value the same as DENY. Firefox removed ALLOW-FROM support in version 70 (2019). The modern equivalent is CSP frame-ancestors with a specific origin: Content-Security-Policy: frame-ancestors 'self' https://partner.example.com. That works in all CSP2-supporting browsers."}},{"@type":"Question","name":"What does frame-ancestors protect that X-Frame-Options doesn't?","acceptedAnswer":{"@type":"Answer","text":"Two things. First, frame-ancestors covers <embed> and <object> elements in addition to <frame> and <iframe> — X-Frame-Options behavior for embed/object tags is inconsistently implemented across browsers. Second, frame-ancestors supports multiple allowed origins and wildcard matching (e.g. https://*.yoursite.com), which X-Frame-Options cannot express at all since ALLOW-FROM only accepted a single origin and is now deprecated."}},{"@type":"Question","name":"Should I set both headers in the same response?","acceptedAnswer":{"@type":"Answer","text":"Yes, the belt-and-suspenders approach is recommended. Set X-Frame-Options: DENY (or SAMEORIGIN) and include frame-ancestors 'none' (or 'self') in your CSP. Modern browsers use frame-ancestors and ignore XFO when both are present, so there is no conflict. Internet Explorer and other browsers without CSP support fall back to X-Frame-Options. The combination gets you full coverage across every browser generation."}},{"@type":"Question","name":"Does HardenCheck check both X-Frame-Options and frame-ancestors?","acceptedAnswer":{"@type":"Answer","text":"Yes. HardenCheck reads X-Frame-Options directly, and also parses your Content-Security-Policy header for a frame-ancestors directive. If your CSP has a valid frame-ancestors value, HardenCheck treats your framing protection as satisfied even if X-Frame-Options is absent — because modern browsers use frame-ancestors. If neither header is present, you will see a clickjacking warning in the report."}},{"@type":"Question","name":"Does a <meta http-equiv> CSP tag cover frame-ancestors?","acceptedAnswer":{"@type":"Answer","text":"No. The CSP spec explicitly prohibits frame-ancestors in meta tags — it is only enforced when delivered as an HTTP response header. If your platform doesn't let you set response headers (such as plain GitHub Pages without a configuration file), frame-ancestors will not work, and you must rely on X-Frame-Options instead, which some CDN layers do allow. Check your platform's header configuration options."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck &mdash; go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Remediation guide</p>
+    <h1>X-Frame-Options vs CSP <code class="inline">frame-ancestors</code>: Which Do You Need?</h1>
+    <p class="lede">Security scanners often flag two separate clickjacking findings on the same site: a missing <code class="inline">X-Frame-Options</code> header, and a <code class="inline">Content-Security-Policy</code> header without a <code class="inline">frame-ancestors</code> directive. They protect against the same attack &mdash; so which one do you actually need to set? This guide explains what each one does, how browser precedence works when both are present, and the exact snippets to deploy on every major platform.</p>
+
+    <div class="callout warn-callout">
+      <strong><code class="inline">X-Frame-Options: ALLOW-FROM</code> is dead.</strong> Chrome, Edge, and Safari never supported it, and Firefox dropped it in version 70 (2019). If you need to allow framing by a specific third-party domain, use CSP <code class="inline">frame-ancestors</code> with that origin instead.
+    </div>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#what-xfo">What X-Frame-Options does</a></li>
+      <li><a href="#what-fa">What frame-ancestors does</a></li>
+      <li><a href="#differences">Key differences</a></li>
+      <li><a href="#precedence">Precedence: what wins</a></li>
+      <li><a href="#recommendation">What to set</a></li>
+      <li><a href="#platform">Platform snippets</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="what-xfo">What X-Frame-Options does</h2>
+    <p>The <code class="inline">X-Frame-Options</code> (XFO) response header, first shipped in browsers around 2009, prevents your page from being loaded inside a <code class="inline">&lt;frame&gt;</code>, <code class="inline">&lt;iframe&gt;</code>, or similar embedding element on a different site. The attack it guards against is <strong>clickjacking</strong>: an attacker loads your page invisibly in an iframe, lays their own UI on top, and tricks users into clicking buttons they can&rsquo;t see &mdash; confirming a payment, deleting an account, changing a password.</p>
+
+    <p>The header has exactly two useful values in 2026:</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Value</th><th>Behaviour</th><th>Use when</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">DENY</code></td>
+          <td>The page cannot be framed by anyone &mdash; not even by a page on the same origin.</td>
+          <td>No legitimate embedding use case exists. The safest default for most sites.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">SAMEORIGIN</code></td>
+          <td>The page can be framed by pages on the same origin; all other origins are blocked.</td>
+          <td>You intentionally embed your own pages in iframes (e.g., a widget on your own domain).</td>
+        </tr>
+        <tr>
+          <td><code class="inline">ALLOW-FROM&nbsp;<em>uri</em></code></td>
+          <td>Intended to allow framing by a specific third-party origin.</td>
+          <td><strong>Avoid.</strong> Unsupported in Chrome, Edge, and Safari; removed from Firefox in 2019. Use CSP <code class="inline">frame-ancestors</code> instead.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>The header for most sites is simply:</p>
+    <pre><code>X-Frame-Options: DENY</code></pre>
+
+    <h2 id="what-fa">What CSP <code class="inline">frame-ancestors</code> does</h2>
+    <p>The <code class="inline">frame-ancestors</code> directive is part of Content Security Policy Level 2 (2015). It controls which origins can embed your page in a <code class="inline">&lt;frame&gt;</code>, <code class="inline">&lt;iframe&gt;</code>, <code class="inline">&lt;embed&gt;</code>, or <code class="inline">&lt;object&gt;</code> element. It supersedes <code class="inline">X-Frame-Options</code> in all browsers that support CSP, and it provides expressive power that XFO never had.</p>
+
+    <p>Common values:</p>
+    <pre><code># Block all framing (equivalent to XFO: DENY)
+Content-Security-Policy: frame-ancestors 'none'
+
+# Allow same-origin only (equivalent to XFO: SAMEORIGIN)
+Content-Security-Policy: frame-ancestors 'self'
+
+# Allow same-origin plus one trusted partner
+Content-Security-Policy: frame-ancestors 'self' https://partner.example.com
+
+# Allow any subdomain of your own domain
+Content-Security-Policy: frame-ancestors 'self' https://*.yoursite.com</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>frame-ancestors goes in the HTTP response header, not a meta tag.</strong> The CSP spec explicitly prohibits <code class="inline">frame-ancestors</code> in <code class="inline">&lt;meta http-equiv&gt;</code> tags &mdash; it is only enforced when delivered as a response header. Browsers silently ignore it in a meta tag.
+    </div>
+
+    <p>The directive is typically included alongside your other CSP rules:</p>
+    <pre><code>Content-Security-Policy: default-src 'self'; script-src 'self'; frame-ancestors 'none'</code></pre>
+
+    <h2 id="differences">Key differences at a glance</h2>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Feature</th><th>X-Frame-Options</th><th>CSP frame-ancestors</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Browser support</td>
+          <td>All browsers including IE 8+</td>
+          <td>All browsers except IE (all versions)</td>
+        </tr>
+        <tr>
+          <td>Block all framing</td>
+          <td><code class="inline">DENY</code></td>
+          <td><code class="inline">'none'</code></td>
+        </tr>
+        <tr>
+          <td>Allow same-origin only</td>
+          <td><code class="inline">SAMEORIGIN</code></td>
+          <td><code class="inline">'self'</code></td>
+        </tr>
+        <tr>
+          <td>Allow a specific third-party origin</td>
+          <td>Not possible (ALLOW-FROM unsupported)</td>
+          <td>Yes &mdash; list any number of specific origins</td>
+        </tr>
+        <tr>
+          <td>Allow wildcard subdomains</td>
+          <td>No</td>
+          <td>Yes &mdash; <code class="inline">https://*.yoursite.com</code></td>
+        </tr>
+        <tr>
+          <td>Covers <code class="inline">&lt;embed&gt;</code> and <code class="inline">&lt;object&gt;</code></td>
+          <td>Inconsistent across browsers</td>
+          <td>Yes, by spec</td>
+        </tr>
+        <tr>
+          <td>Delivered via meta tag</td>
+          <td>No effect</td>
+          <td>Silently ignored (header only)</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="precedence">Precedence: what happens when both headers are present</h2>
+    <p>The CSP specification is clear: when a browser supports CSP Level 2 and a response contains both <code class="inline">X-Frame-Options</code> and a <code class="inline">Content-Security-Policy: frame-ancestors</code> directive, the browser uses <code class="inline">frame-ancestors</code> and ignores <code class="inline">X-Frame-Options</code>. This is the behaviour in Chrome, Firefox, Edge, and Safari.</p>
+
+    <p>Internet Explorer does not support CSP at all. When IE receives both headers, it reads <code class="inline">X-Frame-Options</code> and ignores the entire <code class="inline">Content-Security-Policy</code> header. This is the sole remaining reason to set <code class="inline">X-Frame-Options</code> &mdash; it is the only clickjacking protection IE recognises.</p>
+
+    <table class="severity-table">
+      <thead>
+        <tr><th>Browser</th><th>Which header it uses</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Chrome, Edge (Chromium)</td><td><code class="inline">frame-ancestors</code> (ignores XFO when CSP is present)</td></tr>
+        <tr><td>Firefox</td><td><code class="inline">frame-ancestors</code> (ignores XFO when CSP is present)</td></tr>
+        <tr><td>Safari</td><td><code class="inline">frame-ancestors</code> (ignores XFO when CSP is present)</td></tr>
+        <tr><td>Internet Explorer 9&ndash;11</td><td><code class="inline">X-Frame-Options</code> (ignores entire CSP header)</td></tr>
+      </tbody>
+    </table>
+
+    <p>Crucially, setting both headers with consistent values &mdash; <code class="inline">DENY</code> paired with <code class="inline">'none'</code>, or <code class="inline">SAMEORIGIN</code> paired with <code class="inline">'self'</code> &mdash; creates no conflict. Modern browsers use <code class="inline">frame-ancestors</code>; IE falls back to XFO. The two headers target different browser generations and complement each other cleanly.</p>
+
+    <h2 id="recommendation">What to set in 2026</h2>
+    <p>The recommended approach is belt-and-suspenders: include <code class="inline">frame-ancestors</code> in your CSP, and <em>also</em> send <code class="inline">X-Frame-Options</code>. They do not conflict, and together they cover every browser from IE&nbsp;9 to Chrome&nbsp;latest.</p>
+
+    <p>For a site with no legitimate embedding use case (the vast majority):</p>
+    <pre><code>X-Frame-Options: DENY
+Content-Security-Policy: default-src 'self'; ...; frame-ancestors 'none'</code></pre>
+
+    <p>For a site that embeds its own pages in iframes:</p>
+    <pre><code>X-Frame-Options: SAMEORIGIN
+Content-Security-Policy: default-src 'self'; ...; frame-ancestors 'self'</code></pre>
+
+    <p>For a site that allows embedding by a trusted partner (XFO alone cannot express this):</p>
+    <pre><code>X-Frame-Options: SAMEORIGIN
+Content-Security-Policy: default-src 'self'; ...; frame-ancestors 'self' https://dashboard.partner.com</code></pre>
+    <p>In this third case, modern browsers use <code class="inline">frame-ancestors</code> and allow the partner. IE uses <code class="inline">SAMEORIGIN</code> and blocks the partner &mdash; but IE has less than 1% global usage as of 2026, so this is an acceptable tradeoff. IE also cannot render your modern JavaScript application, making this moot in practice.</p>
+
+    <div class="callout tip-callout">
+      <strong>If you have no CSP yet.</strong> You can add <code class="inline">X-Frame-Options: DENY</code> as a standalone header today &mdash; it is a one-liner and immediately eliminates clickjacking exposure in all browsers. Then build out a full CSP (start in report-only mode as described in <a href="add-content-security-policy-header.html">the CSP guide</a>) and add <code class="inline">frame-ancestors 'none'</code> once your policy is stable.
+    </div>
+
+    <h2 id="platform">Add the headers on your platform</h2>
+    <p>The snippets below add <em>both</em> headers. If you already have a <code class="inline">Content-Security-Policy</code> header, append <code class="inline">; frame-ancestors 'none'</code> to the existing value instead of duplicating the header line.</p>
+
+    <h3>nginx</h3>
+    <pre><code>add_header X-Frame-Options "DENY" always;
+add_header Content-Security-Policy "frame-ancestors 'none'" always;</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>&lt;IfModule mod_headers.c&gt;
+  Header always set X-Frame-Options "DENY"
+  Header always append Content-Security-Policy "frame-ancestors 'none'"
+&lt;/IfModule&gt;</code></pre>
+
+    <h3>Vercel (vercel.json)</h3>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Content-Security-Policy", "value": "frame-ancestors 'none'" }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>const securityHeaders = [
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" }
+];
+
+module.exports = {
+  async headers() {
+    return [{ source: '/(.*)', headers: securityHeaders }];
+  },
+};</code></pre>
+
+    <h3>Netlify (_headers file)</h3>
+    <pre><code>/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'</code></pre>
+
+    <h3>Cloudflare Pages (_headers file)</h3>
+    <pre><code>/*
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>GitHub Pages note.</strong> GitHub Pages does not support custom response headers via a configuration file. If your site is hosted on plain GitHub Pages without a CDN in front, you cannot set <code class="inline">frame-ancestors</code> as a response header. In this case, <code class="inline">X-Frame-Options</code> is also unavailable. The options are: (1) put Cloudflare in front of your GitHub Pages site and add the headers via a Cloudflare Transform Rule, or (2) accept the gap and note it for the next platform migration. HardenCheck&rsquo;s paste mode lets you verify what headers are actually being sent.
+    </div>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>Paste your raw HTTP response headers into HardenCheck after deploying. It reads both <code class="inline">X-Frame-Options</code> and the <code class="inline">frame-ancestors</code> directive inside your <code class="inline">Content-Security-Policy</code>. If your CSP has a valid <code class="inline">frame-ancestors</code> value, HardenCheck treats your framing protection as satisfied even if <code class="inline">X-Frame-Options</code> is absent, since modern browsers will use <code class="inline">frame-ancestors</code>. The paste mode &mdash; using output from <code class="inline">curl -I https://your-site.com</code> &mdash; is the most accurate way to confirm what your server is actually sending.</p>
+
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Grade my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>Does X-Frame-Options still work in modern browsers?</summary>
+        <p>Yes &mdash; Chrome, Firefox, Edge, and Safari all still respect <code class="inline">X-Frame-Options</code>. But when a <code class="inline">Content-Security-Policy</code> with a <code class="inline">frame-ancestors</code> directive is also present in the same response, modern browsers use <code class="inline">frame-ancestors</code> and ignore <code class="inline">X-Frame-Options</code>. XFO still works as a fallback for browsers that don&rsquo;t support CSP (primarily Internet Explorer), but <code class="inline">frame-ancestors</code> is the primary enforcement mechanism in every current browser.</p>
+      </details>
+      <details>
+        <summary>Can I use <code class="inline">X-Frame-Options: ALLOW-FROM</code> to whitelist a specific embedding site?</summary>
+        <p>No, not reliably. <code class="inline">ALLOW-FROM</code> was removed from the spec and is unsupported in Chrome, Edge, and Safari &mdash; those browsers treat any <code class="inline">ALLOW-FROM</code> value the same as <code class="inline">DENY</code>. Firefox removed <code class="inline">ALLOW-FROM</code> support in version 70 (2019). The modern equivalent is CSP <code class="inline">frame-ancestors</code> with a specific origin: <code class="inline">Content-Security-Policy: frame-ancestors 'self' https://partner.example.com</code>. That works in all CSP2-supporting browsers.</p>
+      </details>
+      <details>
+        <summary>What does <code class="inline">frame-ancestors</code> protect that X-Frame-Options doesn&rsquo;t?</summary>
+        <p>Two things. First, <code class="inline">frame-ancestors</code> covers <code class="inline">&lt;embed&gt;</code> and <code class="inline">&lt;object&gt;</code> elements in addition to <code class="inline">&lt;frame&gt;</code> and <code class="inline">&lt;iframe&gt;</code> &mdash; <code class="inline">X-Frame-Options</code> behaviour for embed and object tags is inconsistently implemented across browsers. Second, <code class="inline">frame-ancestors</code> supports multiple allowed origins and wildcard matching (<code class="inline">https://*.yoursite.com</code>), which <code class="inline">X-Frame-Options</code> cannot express at all since <code class="inline">ALLOW-FROM</code> only ever accepted a single origin and is now deprecated.</p>
+      </details>
+      <details>
+        <summary>Should I set both headers in the same response?</summary>
+        <p>Yes, the belt-and-suspenders approach is recommended. Set <code class="inline">X-Frame-Options: DENY</code> (or <code class="inline">SAMEORIGIN</code>) and include <code class="inline">frame-ancestors 'none'</code> (or <code class="inline">'self'</code>) in your CSP. Modern browsers use <code class="inline">frame-ancestors</code> and ignore XFO when both are present, so there is no conflict. Internet Explorer and other browsers without CSP support fall back to <code class="inline">X-Frame-Options</code>. The combination provides full coverage across every browser generation.</p>
+      </details>
+      <details>
+        <summary>Does HardenCheck check both X-Frame-Options and <code class="inline">frame-ancestors</code>?</summary>
+        <p>Yes. HardenCheck reads <code class="inline">X-Frame-Options</code> directly and also parses your <code class="inline">Content-Security-Policy</code> header for a <code class="inline">frame-ancestors</code> directive. If your CSP has a valid <code class="inline">frame-ancestors</code> value, HardenCheck treats your framing protection as satisfied even if <code class="inline">X-Frame-Options</code> is absent &mdash; because modern browsers use <code class="inline">frame-ancestors</code>. If neither is present, you will see a clickjacking warning in the report.</p>
+      </details>
+      <details>
+        <summary>Does a <code class="inline">&lt;meta http-equiv&gt;</code> CSP tag cover <code class="inline">frame-ancestors</code>?</summary>
+        <p>No. The CSP specification explicitly prohibits <code class="inline">frame-ancestors</code> in <code class="inline">&lt;meta http-equiv&gt;</code> tags &mdash; it is only enforced when delivered as an HTTP response header. Browsers silently ignore a <code class="inline">frame-ancestors</code> directive inside a meta tag. If your platform doesn&rsquo;t let you set response headers (such as plain GitHub Pages), <code class="inline">frame-ancestors</code> will not work, and you must rely on <code class="inline">X-Frame-Options</code> instead, which some CDN layers do allow via transform rules.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p>Framing protection is one layer &mdash; these tools and guides cover the rest:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level and eliminate SSL-stripping attacks. Includes the four-step deployment process and preload warnings.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Post-deploy</span>
+        <span class="s-name">ExposureCheck</span>
+        <p>Scan your live URL for exposed <code class="inline">.env</code> files, <code class="inline">.git</code> directories, source maps, and bundled secrets.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">ADA &amp; privacy</span>
+        <span class="s-name">ShipSafe</span>
+        <p>Check your site for WCAG accessibility failures and privacy-risk patterns before they become liabilities.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
