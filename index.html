@@ -44,6 +44,7 @@
     <nav class="nav" aria-label="Primary navigation">
       <a href="about.html">How it works</a>
       <a href="guides/add-content-security-policy-header.html">Fix guides</a>
+      <a href="guides/content-security-policy-strict-dynamic.html">strict-dynamic</a>
     </nav>
   </div>
 </header>
@@ -112,7 +113,7 @@
       <h2 class="detect-title">The headers that actually protect users</h2>
       <p class="detect-sub">HardenCheck grades the response headers and cookie flags every site should set &mdash; and explains, in plain English, what each one stops and exactly how to add it.</p>
       <ul class="detect-grid">
-        <li class="feature"><span class="feat-icon" aria-hidden="true">CSP</span><div><h3>Content-Security-Policy</h3><p>Your strongest defence against cross-site scripting. We flag missing or <code>'unsafe-inline'</code> policies. <a href="guides/add-content-security-policy-header.html">How to add one &rarr;</a></p></div></li>
+        <li class="feature"><span class="feat-icon" aria-hidden="true">CSP</span><div><h3>Content-Security-Policy</h3><p>Your strongest defence against cross-site scripting. We flag missing or <code>'unsafe-inline'</code> policies. <a href="guides/add-content-security-policy-header.html">How to add one &rarr;</a> &middot; <a href="guides/content-security-policy-strict-dynamic.html">strict-dynamic guide &rarr;</a></p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">HSTS</span><div><h3>Strict-Transport-Security</h3><p>Forces HTTPS so attackers can't downgrade the connection. We check <code>max-age</code> and scope. <a href="guides/enable-hsts-header.html">How to enable it &rarr;</a></p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">XFO</span><div><h3>X-Frame-Options</h3><p>Blocks clickjacking by stopping your pages being framed. Also reads CSP <code>frame-ancestors</code>. <a href="guides/x-frame-options-vs-csp-frame-ancestors.html">XFO vs frame-ancestors &rarr;</a></p></div></li>
         <li class="feature"><span class="feat-icon" aria-hidden="true">MIME</span><div><h3>X-Content-Type-Options</h3><p>Stops MIME-sniffing that can turn a file into runnable script. We check for <code>nosniff</code>. <a href="guides/x-content-type-options-nosniff.html">What is nosniff? &rarr;</a></p></div></li>
@@ -240,7 +241,8 @@
     </div>
     <nav class="foot-nav" aria-label="Footer navigation">
       <a href="about.html">How it works</a>
-      <a href="guides/add-content-security-policy-header.html">Fix guides</a>
+      <a href="guides/add-content-security-policy-header.html">CSP basics</a>
+      <a href="guides/content-security-policy-strict-dynamic.html">strict-dynamic guide</a>
       <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
       <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
       <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
