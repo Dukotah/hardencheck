@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Set a Referrer-Policy Header (and Which Value to Use)</title>
+<meta name="description" content="Missing a Referrer-Policy header? This guide explains what the Referer header leaks, compares all eight policy values, and gives exact deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/referrer-policy-header.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How to Set a Referrer-Policy Header (and Which Value to Use)">
+<meta property="og:description" content="Missing a Referrer-Policy header? Learn what the Referer request header leaks to external sites, compare all eight policy values, and get exact deployment snippets for your platform.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/referrer-policy-header.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How to Set a Referrer-Policy Header (and Which Value to Use)","description":"The Referer request header automatically sends the full URL of your page to every external resource and link destination. A missing or weak Referrer-Policy exposes authenticated paths, search queries, and private route segments to third-party servers. This guide explains all eight policy values, recommends strict-origin-when-cross-origin, and provides deployment snippets for nginx, Apache, Vercel, Next.js, Netlify, and Cloudflare Pages.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-08-25","dateModified":"2026-08-25","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/referrer-policy-header.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Referer and Referrer-Policy?","acceptedAnswer":{"@type":"Answer","text":"Referer (note: misspelled in the original HTTP spec — one 'r') is the request header that browsers automatically attach to outgoing requests, containing the URL of the page that initiated the request. Referrer-Policy (spelled correctly) is the response header you set on your server to control what value the browser puts in that Referer header. The policy is yours to set; the Referer header is what the browser sends as a result."}},{"@type":"Question","name":"Does strict-origin-when-cross-origin break my analytics?","acceptedAnswer":{"@type":"Answer","text":"No. strict-origin-when-cross-origin sends the full URL for same-origin requests (page to page within your own site) and sends only the origin for cross-origin requests. Your analytics tool (Google Analytics, Plausible, Fathom, etc.) collects the full page URL from the JavaScript data layer — it does not rely on the Referer header for page-level tracking. The Referer header is used by analytics to identify the referring domain (which campaign or site sent the visitor), and strict-origin-when-cross-origin still sends the origin for that purpose. The full path of the referring page is not exposed cross-origin, which is intentional."}},{"@type":"Question","name":"Do I need to set Referrer-Policy if browsers already default to strict-origin-when-cross-origin?","acceptedAnswer":{"@type":"Answer","text":"Yes, for two reasons: (1) The browser default changed from no-referrer-when-downgrade to strict-origin-when-cross-origin in 2021–2022, but older browsers and some enterprise proxies still use the old default. Setting the header explicitly ensures consistent behaviour across all clients. (2) Security scanners, including HardenCheck, flag the absence of an explicit Referrer-Policy header as a finding — even when the effective behaviour is correct — because explicit is auditable and implicit is not. A two-minute fix closes a genuine finding."}},{"@type":"Question","name":"Can I set Referrer-Policy per page instead of for the whole site?","acceptedAnswer":{"@type":"Answer","text":"Yes. Add a meta tag in the <head> of any page: <meta name=\"referrer\" content=\"no-referrer\">. This overrides the HTTP header for that page only. You can also override at the element level using the referrerpolicy attribute on individual <a>, <img>, <link>, and <form> tags. For example, a link to an external partner can use <a href=\"...\" referrerpolicy=\"no-referrer\"> to send no referrer for that specific link while the site-wide policy remains strict-origin-when-cross-origin."}},{"@type":"Question","name":"What does the Referer header actually expose in practice?","acceptedAnswer":{"@type":"Answer","text":"Without a Referrer-Policy (or with the old default no-referrer-when-downgrade), the browser sends the full URL of the current page in the Referer header to every: external link the user clicks; third-party image, font, or script loaded on the page; external analytics or monitoring endpoint; ad network or social share widget. If your URLs contain a user ID (e.g. /users/12345/settings), a session token (e.g. /reset?token=abc123), a search query (/search?q=...), or a private path (/admin/reports/Q2-revenue), all of that is transmitted to every external domain your page loads resources from."}},{"@type":"Question","name":"What happens if I set no-referrer?","acceptedAnswer":{"@type":"Answer","text":"The browser sends an empty Referer header on all requests — same-origin and cross-origin. Your own server-side analytics that rely on Referer to identify traffic sources will stop seeing any referral data. Third parties receive nothing. This is the most private option, but it breaks referral attribution completely. For most sites, strict-origin-when-cross-origin is the right balance: same-origin requests still carry the full URL for internal analytics, while cross-origin requests are limited to just the origin."}},{"@type":"Question","name":"Does Referrer-Policy affect API requests made by JavaScript?","acceptedAnswer":{"@type":"Answer","text":"Yes. The Referrer-Policy header governs the Referer header on all requests the browser makes, including fetch() and XMLHttpRequest calls. If your JavaScript fetches a third-party API and you have no Referrer-Policy set, the current page's full URL is sent in the Referer header of that API request. With strict-origin-when-cross-origin, only your site's origin is sent. If the API is same-origin (your own backend), the full URL is still included, which is usually fine and expected."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .callout.info-callout{background:var(--surface);border-left:4px solid var(--bay);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;vertical-align:middle}
+  .badge.safe{background:#d4edda;color:#1b4d30}
+  .badge.caution{background:#fff3cd;color:#7a5500}
+  .badge.risky{background:var(--fail-bg);color:#5e2019}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic</a>
+      <a href="csp-react-spa-app.html">React / SPA</a>
+      <a href="referrer-policy-header.html" aria-current="page">Referrer-Policy</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Remediation guide</p>
+    <h1>How to Set a Referrer-Policy Header (and Which Value to Use)</h1>
+    <p class="lede">Every time a visitor on your site clicks a link, loads an image, or triggers a JavaScript fetch, their browser sends the full URL of the current page in a <code class="inline">Referer</code> request header &mdash; to the destination server, without asking. If that URL contains a private path, a search query, a reset token, or a user ID, it just leaked. A <code class="inline">Referrer-Policy</code> header lets you control exactly what gets sent. This guide explains all eight policy values, tells you which one to pick, and gives exact deployment snippets for every major hosting platform.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#what-leaks">What the Referer header exposes</a></li>
+      <li><a href="#eight-values">All eight policy values</a></li>
+      <li><a href="#recommendation">Which value to use</a></li>
+      <li><a href="#platform">Deploy on your platform</a></li>
+      <li><a href="#per-page">Per-page and per-element overrides</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="what-leaks">What the Referer header actually exposes</h2>
+    <p>The <code class="inline">Referer</code> header (misspelled in the original HTTP specification &mdash; one &lsquo;r&rsquo; &mdash; and never corrected) is automatically attached by the browser to every outgoing request. Without a <code class="inline">Referrer-Policy</code> header, or with the old browser default <code class="inline">no-referrer-when-downgrade</code>, the full URL of the current page is sent to:</p>
+    <ul>
+      <li>Every external link the user clicks</li>
+      <li>Every third-party image, font, script, or stylesheet your page loads</li>
+      <li>Analytics endpoints, ad networks, and social share widgets</li>
+      <li>Any <code class="inline">fetch()</code> or <code class="inline">XMLHttpRequest</code> call to an external domain</li>
+    </ul>
+    <p>This is a problem when your URLs carry meaningful data. Common real-world examples:</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>URL pattern</th><th>What leaks to third parties</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">/reset-password?token=abc123xyz</code></td>
+          <td>The password-reset token, which may be valid for minutes or hours</td>
+        </tr>
+        <tr>
+          <td><code class="inline">/users/8421/settings</code></td>
+          <td>An internal user ID, which an attacker could use for enumeration</td>
+        </tr>
+        <tr>
+          <td><code class="inline">/search?q=confidential+acquisition+plan</code></td>
+          <td>The full search query &mdash; visible to your search analytics CDN</td>
+        </tr>
+        <tr>
+          <td><code class="inline">/admin/reports/Q2-revenue</code></td>
+          <td>The fact that an admin panel exists and its URL structure</td>
+        </tr>
+        <tr>
+          <td><code class="inline">/checkout?cart_id=...&promo=STAFF50</code></td>
+          <td>Internal promotion codes and cart identifiers</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>If your site loads a Google Font, a Stripe.js file, an analytics pixel, or any third-party resource from a CDN, those servers receive a <code class="inline">Referer</code> header on every page load. The hosting companies for those services may log those headers. Setting a <code class="inline">Referrer-Policy</code> is a one-line fix that stops this.</p>
+
+    <h2 id="eight-values">All eight policy values explained</h2>
+    <p>The <code class="inline">Referrer-Policy</code> header accepts one of eight values. &ldquo;Origin&rdquo; means just the scheme + domain + port (e.g.&nbsp;<code class="inline">https://yoursite.com</code>) with no path. &ldquo;Full URL&rdquo; means the complete URL including path and query string.</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Value</th><th>Same-origin sends</th><th>Cross-origin HTTPS sends</th><th>Cross-origin HTTP sends</th><th>Risk</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">no-referrer</code></td>
+          <td>Nothing</td>
+          <td>Nothing</td>
+          <td>Nothing</td>
+          <td><span class="badge safe">Safest</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">no-referrer-when-downgrade</code></td>
+          <td>Full URL</td>
+          <td>Full URL</td>
+          <td>Nothing</td>
+          <td><span class="badge risky">Leaks paths cross-origin</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">origin</code></td>
+          <td>Origin only</td>
+          <td>Origin only</td>
+          <td>Origin only</td>
+          <td><span class="badge safe">Safe</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">origin-when-cross-origin</code></td>
+          <td>Full URL</td>
+          <td>Origin only</td>
+          <td>Origin only</td>
+          <td><span class="badge safe">Safe</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">same-origin</code></td>
+          <td>Full URL</td>
+          <td>Nothing</td>
+          <td>Nothing</td>
+          <td><span class="badge safe">Safe</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">strict-origin</code></td>
+          <td>Origin only</td>
+          <td>Origin only</td>
+          <td>Nothing</td>
+          <td><span class="badge safe">Safe</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">strict-origin-when-cross-origin</code></td>
+          <td>Full URL</td>
+          <td>Origin only</td>
+          <td>Nothing</td>
+          <td><span class="badge safe">Recommended</span></td>
+        </tr>
+        <tr>
+          <td><code class="inline">unsafe-url</code></td>
+          <td>Full URL</td>
+          <td>Full URL</td>
+          <td>Full URL</td>
+          <td><span class="badge risky">Always leaks paths</span></td>
+        </tr>
+      </tbody>
+    </table>
+    <p>The two values you should avoid:</p>
+    <ul>
+      <li><strong><code class="inline">no-referrer-when-downgrade</code></strong> &mdash; was the old browser default. Sends the full URL cross-origin to any HTTPS destination, which covers the vast majority of third-party resources. Legacy &mdash; do not set explicitly.</li>
+      <li><strong><code class="inline">unsafe-url</code></strong> &mdash; sends the full URL everywhere, including HTTP destinations. Maximally leaky. Only exists for backward-compatibility.</li>
+    </ul>
+
+    <h2 id="recommendation">Which value to use</h2>
+    <p>For almost every website, the right answer is <code class="inline">strict-origin-when-cross-origin</code>:</p>
+    <pre><code>Referrer-Policy: strict-origin-when-cross-origin</code></pre>
+    <p>Here is what it does and why each part is correct:</p>
+    <ul>
+      <li><strong>Same-origin requests get the full URL.</strong> When your own pages link to each other or load your own resources, the full path is sent. This means your own server-side analytics and logs still see page-level referral data within your site.</li>
+      <li><strong>Cross-origin HTTPS requests get only the origin.</strong> When you link to an external site or load a third-party resource over HTTPS, the destination sees <code class="inline">https://yoursite.com</code> &mdash; not the path. Third-party analytics providers can identify that the visitor came from your site; they cannot see which page or what the query string contained.</li>
+      <li><strong>Cross-origin HTTP requests get nothing.</strong> If the destination is HTTP (an insecure, unencrypted connection), no referrer is sent at all. This prevents leaking your HTTPS URLs into an unencrypted channel where they can be intercepted.</li>
+    </ul>
+
+    <div class="callout tip-callout">
+      <strong>This is already the browser default since 2021&ndash;2022.</strong> Chrome 85 (August 2020), Firefox 87 (March 2021), and Safari 14.5 (April 2021) all changed their default to <code class="inline">strict-origin-when-cross-origin</code>. But &ldquo;the browser default&rdquo; is not the same as an explicit header: older browsers, crawlers, and some enterprise proxies still use the old default. Setting the header explicitly costs two minutes and guarantees consistent behaviour everywhere. Security scanners, including HardenCheck, flag missing headers even when the effective behaviour is correct &mdash; because explicit is auditable and implicit is not.
+    </div>
+
+    <p><strong>When you might choose something stricter:</strong></p>
+    <ul>
+      <li><strong><code class="inline">same-origin</code></strong> &mdash; if your site never needs external parties to know your origin at all and you don&rsquo;t care about third-party referral attribution. Sends nothing cross-origin.</li>
+      <li><strong><code class="inline">no-referrer</code></strong> &mdash; the most private option. Sends nothing, even same-origin. Breaks server-side referral tracking entirely. Appropriate for applications where URL paths are sensitive even to your own analytics.</li>
+    </ul>
+
+    <h2 id="platform">Deploy it on your platform</h2>
+
+    <h3>nginx</h3>
+    <pre><code>add_header Referrer-Policy "strict-origin-when-cross-origin" always;</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>&lt;IfModule mod_headers.c&gt;
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+&lt;/IfModule&gt;</code></pre>
+
+    <h3>Vercel (vercel.json)</h3>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>const securityHeaders = [
+  {
+    key: 'Referrer-Policy',
+    value: 'strict-origin-when-cross-origin'
+  }
+];
+
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
+};</code></pre>
+
+    <h3>Netlify (_headers file)</h3>
+    <pre><code>/*
+  Referrer-Policy: strict-origin-when-cross-origin</code></pre>
+
+    <h3>Cloudflare Pages (_headers file)</h3>
+    <pre><code>/*
+  Referrer-Policy: strict-origin-when-cross-origin</code></pre>
+
+    <h3>Express.js</h3>
+    <pre><code>app.use((req, res, next) => {
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});</code></pre>
+    <p>If you use the <strong>Helmet</strong> middleware, it sets <code class="inline">Referrer-Policy: no-referrer</code> by default. To use the recommended value instead:</p>
+    <pre><code>app.use(helmet({
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' }
+}));</code></pre>
+
+    <div class="callout info-callout">
+      <strong>Combining multiple headers in one configuration block?</strong> You can set all five recommended headers &mdash; <code class="inline">Referrer-Policy</code>, <code class="inline">Content-Security-Policy</code>, <code class="inline">Strict-Transport-Security</code>, <code class="inline">X-Content-Type-Options</code>, and <code class="inline">X-Frame-Options</code> &mdash; in the same platform configuration block. Stack them together rather than maintaining separate configuration sections for each header.
+    </div>
+
+    <h2 id="per-page">Per-page and per-element overrides</h2>
+    <p>The <code class="inline">Referrer-Policy</code> HTTP header sets the default for your entire site. You can override it at two more granular levels:</p>
+
+    <h3>Per page &mdash; HTML meta tag</h3>
+    <p>Add a <code class="inline">&lt;meta&gt;</code> tag in the <code class="inline">&lt;head&gt;</code> of any page. This overrides the HTTP header for that page only:</p>
+    <pre><code>&lt;meta name="referrer" content="no-referrer"&gt;</code></pre>
+    <p>Useful for pages with particularly sensitive URL structure &mdash; admin panels, password reset flows, private reports &mdash; where you want even stricter behaviour than the site default.</p>
+
+    <h3>Per element &mdash; referrerpolicy attribute</h3>
+    <p>Individual links, images, iframes, scripts, and form elements accept a <code class="inline">referrerpolicy</code> attribute that overrides the page-level policy for that request only:</p>
+    <pre><code>&lt;!-- No referrer sent when a visitor clicks this external link --&gt;
+&lt;a href="https://example.com/partner" referrerpolicy="no-referrer"&gt;Partner site&lt;/a&gt;
+
+&lt;!-- Only origin sent when loading this external image --&gt;
+&lt;img src="https://cdn.example.com/photo.jpg" referrerpolicy="origin"&gt;
+
+&lt;!-- No referrer for this iframe embed --&gt;
+&lt;iframe src="https://embed.example.com/widget" referrerpolicy="no-referrer"&gt;&lt;/iframe&gt;</code></pre>
+    <p>The per-element attribute is additive: you can set a default policy that covers 99% of your site and add stricter policies on specific sensitive elements without changing the site-wide header.</p>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>Once you&rsquo;ve deployed your <code class="inline">Referrer-Policy</code> header, paste your raw response headers into HardenCheck. It checks whether the header is present, whether the value is a recognised policy, and whether it meets the recommended baseline of <code class="inline">strict-origin-when-cross-origin</code> or stricter. You can test different policy values by editing the paste directly and watching the grade update in real time, without touching your server.</p>
+
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Grade my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>What is the difference between <code class="inline">Referer</code> and <code class="inline">Referrer-Policy</code>?</summary>
+        <p><code class="inline">Referer</code> (note: misspelled in the original HTTP spec &mdash; one &lsquo;r&rsquo;) is the <em>request</em> header that browsers automatically attach to outgoing requests, containing the URL of the page that initiated the request. <code class="inline">Referrer-Policy</code> (spelled correctly) is the <em>response</em> header you set on your server to control what value the browser puts in that <code class="inline">Referer</code> header. The policy is yours to set; the <code class="inline">Referer</code> header is what the browser sends as a result.</p>
+      </details>
+      <details>
+        <summary>Does <code class="inline">strict-origin-when-cross-origin</code> break my analytics?</summary>
+        <p>No. <code class="inline">strict-origin-when-cross-origin</code> sends the full URL for same-origin requests (page to page within your own site) and sends only the origin for cross-origin requests. Your analytics tool collects the full page URL from the JavaScript data layer &mdash; it does not rely on the <code class="inline">Referer</code> header for page-level tracking. The <code class="inline">Referer</code> header is used by analytics to identify the <em>referring domain</em> (which campaign or external site sent the visitor), and <code class="inline">strict-origin-when-cross-origin</code> still sends the origin for that purpose.</p>
+      </details>
+      <details>
+        <summary>Do I need to set <code class="inline">Referrer-Policy</code> if browsers already default to <code class="inline">strict-origin-when-cross-origin</code>?</summary>
+        <p>Yes, for two reasons. First, older browsers and some enterprise proxies still use the old default (<code class="inline">no-referrer-when-downgrade</code>), which sends the full URL cross-origin. Setting the header explicitly ensures consistent behaviour across all clients. Second, security scanners &mdash; including HardenCheck &mdash; flag the absence of an explicit <code class="inline">Referrer-Policy</code> as a finding even when the effective behaviour happens to be correct. Explicit is auditable; implicit is not.</p>
+      </details>
+      <details>
+        <summary>Can I set <code class="inline">Referrer-Policy</code> per page instead of for the whole site?</summary>
+        <p>Yes. Add <code class="inline">&lt;meta name="referrer" content="no-referrer"&gt;</code> in the <code class="inline">&lt;head&gt;</code> of any page to override the HTTP header for that page only. You can also override at the element level using the <code class="inline">referrerpolicy</code> attribute on individual <code class="inline">&lt;a&gt;</code>, <code class="inline">&lt;img&gt;</code>, <code class="inline">&lt;link&gt;</code>, and <code class="inline">&lt;form&gt;</code> tags. This lets you set a relaxed site-wide default while applying a stricter policy on specific sensitive pages or links.</p>
+      </details>
+      <details>
+        <summary>What does the <code class="inline">Referer</code> header actually expose in practice?</summary>
+        <p>Without a <code class="inline">Referrer-Policy</code>, the browser sends the full URL of the current page to every external link click, every third-party image or script your page loads, and every external API call your JavaScript makes. If your URLs contain a user ID (<code class="inline">/users/12345/settings</code>), a session token (<code class="inline">/reset?token=abc123</code>), a search query, or a private path (<code class="inline">/admin/reports/Q2</code>), all of that is transmitted to every external domain your page references.</p>
+      </details>
+      <details>
+        <summary>What happens if I set <code class="inline">no-referrer</code>?</summary>
+        <p>The browser sends an empty <code class="inline">Referer</code> header on all requests &mdash; same-origin and cross-origin. Third parties receive nothing. Your own server-side analytics that rely on the <code class="inline">Referer</code> header for traffic-source attribution will stop seeing referral data entirely. For most sites, <code class="inline">strict-origin-when-cross-origin</code> is the right balance: same-origin requests still carry the full URL, while cross-origin requests are limited to just the origin.</p>
+      </details>
+      <details>
+        <summary>Does <code class="inline">Referrer-Policy</code> affect API requests made by JavaScript?</summary>
+        <p>Yes. The policy governs the <code class="inline">Referer</code> header on all requests the browser makes, including <code class="inline">fetch()</code> and <code class="inline">XMLHttpRequest</code> calls. If your JavaScript fetches a third-party API and you have no <code class="inline">Referrer-Policy</code> set, the current page&rsquo;s full URL is sent in the <code class="inline">Referer</code> header of that API request. With <code class="inline">strict-origin-when-cross-origin</code>, only your site&rsquo;s origin is sent to cross-origin APIs. Same-origin API calls still receive the full URL, which is expected and generally fine.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p><code class="inline">Referrer-Policy</code> is one of five security headers HardenCheck checks &mdash; here are guides for the others:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level &mdash; so attackers can&rsquo;t strip the connection even if a visitor types http://.</p>
+      </a>
+      <a href="x-content-type-options-nosniff.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">X-Content-Type-Options</span>
+        <p>Stop MIME-sniffing attacks that turn uploaded files into executable scripts.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">ADA &amp; privacy</span>
+        <span class="s-name">ShipSafe</span>
+        <p>Check your site for WCAG accessibility failures and privacy-risk patterns before they become liabilities.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic guide</a>
+      <a href="csp-react-spa-app.html">React / SPA guide</a>
+      <a href="enable-hsts-header.html">HSTS guide</a>
+      <a href="x-content-type-options-nosniff.html">X-Content-Type-Options</a>
+      <a href="referrer-policy-header.html">Referrer-Policy guide</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
