@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Set a Permissions-Policy Header (and Which Features to Disable)</title>
+<meta name="description" content="Missing a Permissions-Policy header? This guide explains what the header controls, why camera/microphone/geolocation should be disabled by default, and gives exact deployment snippets for nginx, Apache, Vercel, Netlify, and more.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/permissions-policy-header.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How to Set a Permissions-Policy Header (and Which Features to Disable)">
+<meta property="og:description" content="Missing a Permissions-Policy header? Learn which browser APIs your site exposes by default, compare allowlist syntax options, and get exact deployment snippets for your platform.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/permissions-policy-header.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How to Set a Permissions-Policy Header (and Which Features to Disable)","description":"The Permissions-Policy header lets you explicitly declare which browser APIs your site needs — camera, microphone, geolocation, payment, and more. Without it, every feature is potentially available to your page and any iframe it embeds, even ones you never use. This guide explains the allowlist syntax, recommends a safe baseline that disables every feature your site doesn't use, and provides deployment snippets for nginx, Apache, Vercel, Next.js, Netlify, and Cloudflare Pages.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-09-11","dateModified":"2026-09-11","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/permissions-policy-header.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is the difference between Feature-Policy and Permissions-Policy?","acceptedAnswer":{"@type":"Answer","text":"Feature-Policy was the original name of this header, introduced around 2016–2018. It was renamed to Permissions-Policy in 2020 as the specification was standardised. The two headers use different syntax: Feature-Policy used a space-separated allowlist (Feature-Policy: camera 'none'; microphone 'none') while Permissions-Policy uses a structured-fields syntax with parentheses (Permissions-Policy: camera=(), microphone=()). Chrome 88+ (January 2021) and other modern browsers support only the new Permissions-Policy syntax. Some security scanners still report 'Feature-Policy' as a finding alongside Permissions-Policy — they are separate headers and you only need to set the new one on modern sites."}},{"@type":"Question","name":"What does () mean in a Permissions-Policy directive?","acceptedAnswer":{"@type":"Answer","text":"An empty allowlist — written as () — means the feature is denied for all origins, including your own site. The browser will block any call to that API on your page and in any iframe your page embeds, regardless of the iframe's src. This is the most restrictive value and the right default for any feature your site does not actively use. Contrast with (self), which allows the feature on your own origin but denies it in third-party iframes."}},{"@type":"Question","name":"Can an iframe override a Permissions-Policy set by the parent?","acceptedAnswer":{"@type":"Answer","text":"No. The parent page's Permissions-Policy acts as a ceiling. If the parent sets camera=(), then even an iframe with allow=\"camera\" in its markup will be denied camera access — the header wins. An iframe can only use a feature if both the parent's Permissions-Policy header allows it and the iframe's allow attribute explicitly grants it. You can use this to give specific trusted iframes access while keeping the site-wide default restrictive: set camera=(self) in the header and add allow=\"camera\" only to the iframes that need it."}},{"@type":"Question","name":"Will setting Permissions-Policy break my site's existing features?","acceptedAnswer":{"@type":"Answer","text":"Only if you deny a feature your site actually uses. Before deploying, audit which APIs your pages call: does any page call navigator.geolocation.getCurrentPosition()? Does any page request camera or microphone via getUserMedia()? Does any page use the Payment Request API? If yes, add the corresponding feature to your allowlist as (self) rather than (). The safe approach is to start with a short allowlist that includes only the features you actively need, deploy in a staging environment, and test the relevant user flows before shipping to production."}},{"@type":"Question","name":"Do I need to set Permissions-Policy for features I don't use?","acceptedAnswer":{"@type":"Answer","text":"Yes, and this is the point of the header. Without a Permissions-Policy header, browser features like camera and geolocation are governed only by the browser's own permission prompts — a user could grant access, and a third-party script injected via a compromised dependency could silently try to use it. Setting camera=() and microphone=() explicitly tells the browser to refuse those APIs unconditionally, even if the user has previously granted permission for your origin. It also prevents any iframe you embed (ads, widgets, embeds) from accessing those features without your explicit allowance."}},{"@type":"Question","name":"How do I allow a feature for one page but not the whole site?","acceptedAnswer":{"@type":"Answer","text":"The Permissions-Policy HTTP header applies to the entire origin — you cannot scope it to a single URL path. To allow a feature only on specific pages, the practical approach is to set a restrictive site-wide header (e.g. geolocation=()) and then handle the exception at the application layer: for example, use a service worker to rewrite the header on that specific path, or host the feature-using functionality on a subdomain with its own permissive header. For iframes, the per-element allow attribute gives granular control: set geolocation=() in the header and add allow=\"geolocation\" only to the specific iframes that need it."}},{"@type":"Question","name":"Does Permissions-Policy affect JavaScript APIs like navigator.clipboard?","acceptedAnswer":{"@type":"Answer","text":"Yes. Many JavaScript APIs are gated by Permissions-Policy directives. The clipboard-read and clipboard-write directives control navigator.clipboard.readText() and writeText(). If you set clipboard-read=() and a script calls clipboard.readText(), it will be rejected with a NotAllowedError even if the user previously granted clipboard access. For sites that rely on clipboard operations (rich-text editors, code copy buttons), add clipboard-write=(self) to your allowlist. Note that clipboard-write is typically less sensitive than clipboard-read, which can silently read whatever the user has copied."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .callout.info-callout{background:var(--surface);border-left:4px solid var(--bay);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;vertical-align:middle}
+  .badge.safe{background:#d4edda;color:#1b4d30}
+  .badge.caution{background:#fff3cd;color:#7a5500}
+  .badge.risky{background:var(--fail-bg);color:#5e2019}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic</a>
+      <a href="referrer-policy-header.html">Referrer-Policy</a>
+      <a href="permissions-policy-header.html" aria-current="page">Permissions-Policy</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Remediation guide</p>
+    <h1>How to Set a Permissions-Policy Header (and Which Features to Disable)</h1>
+    <p class="lede">Your site probably doesn&rsquo;t need camera access, microphone access, or the ability to request the user&rsquo;s location &mdash; but without a <code class="inline">Permissions-Policy</code> header, any script running on your page, and any iframe you embed, can ask the browser for those APIs. One compromised dependency or a third-party ad iframe is all it takes. A single header tells the browser exactly which features you&rsquo;ve intentionally enabled, and blocks everything else at the browser level &mdash; before any JavaScript even runs.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#what-it-controls">What Permissions-Policy controls</a></li>
+      <li><a href="#syntax">How the allowlist syntax works</a></li>
+      <li><a href="#baseline">A safe baseline policy</a></li>
+      <li><a href="#common-directives">Common directives explained</a></li>
+      <li><a href="#iframes">Permissions-Policy and iframes</a></li>
+      <li><a href="#platform">Deploy on your platform</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="what-it-controls">What Permissions-Policy controls</h2>
+    <p>The <code class="inline">Permissions-Policy</code> response header (formerly <code class="inline">Feature-Policy</code>, renamed in 2020) is a declarative allowlist for browser APIs that carry privacy or security risk. When a browser feature appears in the policy with an empty allowlist &mdash; written <code class="inline">()</code> &mdash; the browser refuses any attempt to use that feature on your page, including from third-party scripts and iframes. When a feature is absent from the policy, default browser behaviour applies (which for most features means the browser&rsquo;s own permission prompt still governs access).</p>
+    <p>The APIs Permissions-Policy governs are not obscure. They include:</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>What gets controlled</th><th>Why it matters</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">camera</code>, <code class="inline">microphone</code></td>
+          <td>Physical device access. A third-party script that activates these triggers no extra browser prompt if the user previously granted your origin permission.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">geolocation</code></td>
+          <td>Precise location. Previously-granted permissions can be used by any script on the page, not just yours.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">payment</code></td>
+          <td>The Payment Request API. Should be locked to <code class="inline">(self)</code> on any page that uses it; disabled everywhere else.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">usb</code>, <code class="inline">hid</code>, <code class="inline">serial</code></td>
+          <td>Hardware API access. Rarely needed; high impact if misused.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">display-capture</code></td>
+          <td>Screen capture via <code class="inline">getDisplayMedia()</code>. A tool for legitimate conferencing apps; a powerful exfiltration vector if abused.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">clipboard-read</code></td>
+          <td>Read whatever the user has copied &mdash; passwords, 2FA codes, confidential text &mdash; without a visible prompt in some contexts.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>Setting a <code class="inline">Permissions-Policy</code> header does not replace browser permission prompts. It is a server-side ceiling: even if the user would be willing to grant access, a feature blocked by <code class="inline">Permissions-Policy</code> will be denied unconditionally. This makes it effective as a defence against supply-chain attacks: a compromised npm package that calls <code class="inline">navigator.mediaDevices.getUserMedia()</code> will get a <code class="inline">NotAllowedError</code> if <code class="inline">camera=()</code> is set, without any user interaction required.</p>
+
+    <h2 id="syntax">How the allowlist syntax works</h2>
+    <p>Each directive takes an allowlist in parentheses. There are three values to know:</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Syntax</th><th>Meaning</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code class="inline">feature=()</code></td>
+          <td>Deny all. The feature is blocked for your origin and every iframe you embed. This is the right default for any feature you don&rsquo;t use.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">feature=(self)</code></td>
+          <td>Allow same origin only. Your pages can use the feature; third-party iframes cannot unless you explicitly grant it via the <code class="inline">allow</code> attribute.</td>
+        </tr>
+        <tr>
+          <td><code class="inline">feature=*</code></td>
+          <td>Allow all origins. Equivalent to no restriction. Only use this if you explicitly want iframes from any origin to access the feature.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p>You can also allow specific third-party origins by listing them:</p>
+    <pre><code>Permissions-Policy: camera=(self "https://video.example.com")</code></pre>
+    <p>This allows camera access on your own pages and in iframes from <code class="inline">video.example.com</code>, and denies it everywhere else.</p>
+    <p>Multiple directives are separated by commas:</p>
+    <pre><code>Permissions-Policy: camera=(), microphone=(), geolocation=(self)</code></pre>
+
+    <div class="callout warn-callout">
+      <strong>Feature-Policy syntax is different and deprecated.</strong> The old header used a different format: <code class="inline">Feature-Policy: camera 'none'; geolocation 'self'</code> &mdash; note single quotes around the values, no parentheses, and semicolon separators. Chrome dropped Feature-Policy support in Chrome 88 (January 2021). Set only <code class="inline">Permissions-Policy</code>; the old header does nothing on modern browsers and adding it alongside the new one creates a maintenance burden with no benefit.
+    </div>
+
+    <h2 id="baseline">A safe baseline policy</h2>
+    <p>The following policy disables every high-risk browser API. It is safe to deploy on any site that does not use video calling, geolocation, hardware access, or screen capture. Check the list of directives in the next section before deploying if you&rsquo;re unsure whether your site uses any of these features.</p>
+    <pre><code>Permissions-Policy:
+  camera=(),
+  microphone=(),
+  geolocation=(),
+  payment=(),
+  usb=(),
+  display-capture=(),
+  clipboard-read=(),
+  hid=(),
+  serial=()</code></pre>
+    <p>Written as a single header line (required by most web servers):</p>
+    <pre><code>Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=(), hid=(), serial=()</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>Start with what you actually use.</strong> Before shipping the baseline, audit your code for calls to <code class="inline">navigator.geolocation</code>, <code class="inline">navigator.mediaDevices</code>, <code class="inline">navigator.clipboard.readText()</code>, and the Payment Request API. If you use geolocation, change <code class="inline">geolocation=()</code> to <code class="inline">geolocation=(self)</code>. The baseline is designed to be safe by default, not to break anything &mdash; but verifying against your actual feature usage takes two minutes and prevents a confusing regression.
+    </div>
+
+    <h2 id="common-directives">Common directives explained</h2>
+    <p>These are the directives HardenCheck evaluates and the ones most commonly flagged by security scanners:</p>
+
+    <h3>camera and microphone</h3>
+    <p>Both call <code class="inline">navigator.mediaDevices.getUserMedia()</code>. If your site has no video calling, no voice recording, and no QR scanner, set both to <code class="inline">()</code>. If you use them on specific pages (e.g., a video consultation page), set <code class="inline">(self)</code> and ensure only that page triggers the prompt.</p>
+
+    <h3>geolocation</h3>
+    <p>Calls <code class="inline">navigator.geolocation.getCurrentPosition()</code> or <code class="inline">watchPosition()</code>. If your site shows maps or location-based results, set <code class="inline">(self)</code>. If it does not, set <code class="inline">()</code>. Most marketing and SaaS sites do not need geolocation at all.</p>
+
+    <h3>payment</h3>
+    <p>Controls the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Payment_Request_API" target="_blank" rel="noopener noreferrer">Payment Request API</a> &mdash; the browser-native checkout flow (Apple Pay, Google Pay via the browser). This is distinct from client-side libraries like Stripe.js, which do not require this permission. Set <code class="inline">()</code> unless you are explicitly using the Payment Request API.</p>
+
+    <h3>display-capture</h3>
+    <p>Controls <code class="inline">navigator.mediaDevices.getDisplayMedia()</code> &mdash; screen sharing. Used by conferencing tools. Set <code class="inline">()</code> on any site that is not a video conferencing application.</p>
+
+    <h3>clipboard-read and clipboard-write</h3>
+    <p><code class="inline">clipboard-read</code> covers <code class="inline">navigator.clipboard.readText()</code> and <code class="inline">readClipboardItems()</code>. This is the sensitive one: reading the clipboard can capture whatever the user last copied &mdash; a password, a 2FA code, a private document snippet. Set <code class="inline">()</code> unless you have a genuine use case (e.g., a password manager or rich-text editor that pastes formatted content). <code class="inline">clipboard-write</code> controls <code class="inline">writeText()</code> &mdash; writing to the clipboard. This is lower risk and commonly needed for &ldquo;copy to clipboard&rdquo; buttons. Set <code class="inline">(self)</code> if you use copy buttons.</p>
+
+    <h3>fullscreen</h3>
+    <p>Controls <code class="inline">Element.requestFullscreen()</code>. Unlike the other directives, the default value for <code class="inline">fullscreen</code> is <code class="inline">(self)</code> in most browsers &mdash; meaning it is already restricted to the same origin without an explicit header. Setting <code class="inline">fullscreen=()</code> blocks it entirely, including for your own pages. Only set it to <code class="inline">()</code> if your site has no full-screen video players or image viewers.</p>
+
+    <h2 id="iframes">Permissions-Policy and iframes</h2>
+    <p>The header sets a ceiling for your entire origin. An iframe can only access a feature if both of these are true:</p>
+    <ol>
+      <li>Your site&rsquo;s <code class="inline">Permissions-Policy</code> header allows the feature for the iframe&rsquo;s origin (or uses <code class="inline">*</code>)</li>
+      <li>The <code class="inline">&lt;iframe&gt;</code> element has an <code class="inline">allow</code> attribute that grants the feature</li>
+    </ol>
+    <p>This means you can set a restrictive site-wide policy while giving specific trusted iframes access. For example, if you embed a Zoom widget that needs camera access:</p>
+    <pre><code>&lt;!-- Site-wide header: Permissions-Policy: camera=("https://zoom.us") --&gt;
+&lt;iframe src="https://zoom.us/wc/12345/join"
+        allow="camera; microphone"&gt;&lt;/iframe&gt;</code></pre>
+    <p>The <code class="inline">allow</code> attribute on the iframe is a request; the header on the parent page is the grant. If the header doesn&rsquo;t allow the feature for that origin, the <code class="inline">allow</code> attribute is ignored.</p>
+
+    <div class="callout info-callout">
+      <strong>Embedded third-party widgets often request camera or microphone access.</strong> Chat widgets, video widgets, and some analytics embeds use iframes that may call browser APIs. If you embed any third-party widget in an iframe and that widget stops working after you deploy <code class="inline">Permissions-Policy</code>, check whether it needs a feature you&rsquo;ve blocked. Add the specific origin to the allowlist for that feature rather than widening the policy.
+    </div>
+
+    <h2 id="platform">Deploy it on your platform</h2>
+
+    <h3>nginx</h3>
+    <pre><code>add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()" always;</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>&lt;IfModule mod_headers.c&gt;
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()"
+&lt;/IfModule&gt;</code></pre>
+
+    <h3>Vercel (vercel.json)</h3>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()"
+        }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>const securityHeaders = [
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()'
+  }
+];
+
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
+};</code></pre>
+
+    <h3>Netlify (_headers file)</h3>
+    <pre><code>/*
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()</code></pre>
+
+    <h3>Cloudflare Pages (_headers file)</h3>
+    <pre><code>/*
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()</code></pre>
+
+    <h3>Express.js</h3>
+    <pre><code>app.use((req, res, next) => {
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), payment=(), usb=(), display-capture=(), clipboard-read=()'
+  );
+  next();
+});</code></pre>
+    <p>If you use the <strong>Helmet</strong> middleware, it does not set <code class="inline">Permissions-Policy</code> by default. Add it with the <code class="inline">permissionsPolicy</code> option (available in Helmet 7+):</p>
+    <pre><code>app.use(helmet({
+  permissionsPolicy: {
+    policy: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      payment: [],
+      usb: [],
+      'display-capture': [],
+      'clipboard-read': []
+    }
+  }
+}));</code></pre>
+    <p>An empty array (<code class="inline">[]</code>) in Helmet&rsquo;s API maps to <code class="inline">()</code> in the header value &mdash; deny all.</p>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>After deploying your <code class="inline">Permissions-Policy</code> header, paste your raw response headers into HardenCheck. It checks whether the header is present, whether the syntax is valid structured-fields format (the new <code class="inline">feature=()</code> syntax, not the deprecated <code class="inline">feature 'none'</code> syntax), and whether the high-risk features — camera, microphone, geolocation — are restricted. You can test different policy values by editing the paste directly; the grade updates immediately.</p>
+
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Grade my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>What is the difference between <code class="inline">Feature-Policy</code> and <code class="inline">Permissions-Policy</code>?</summary>
+        <p><code class="inline">Feature-Policy</code> was the original name, introduced around 2016&ndash;2018. It was renamed to <code class="inline">Permissions-Policy</code> in 2020 as the specification was standardised. The two headers use different syntax: Feature-Policy used space-separated values with single-quoted keywords (<code class="inline">Feature-Policy: camera 'none'; geolocation 'self'</code>), while Permissions-Policy uses a structured-fields format with parentheses (<code class="inline">Permissions-Policy: camera=(), geolocation=(self)</code>). Chrome 88+ (January 2021) and other modern browsers support only the new syntax. Set only <code class="inline">Permissions-Policy</code>; the old header does nothing on current browsers.</p>
+      </details>
+      <details>
+        <summary>What does <code class="inline">()</code> mean in a <code class="inline">Permissions-Policy</code> directive?</summary>
+        <p>An empty allowlist &mdash; <code class="inline">()</code> &mdash; means the feature is denied for all origins, including your own site. Any script on your page that calls the blocked API will receive a <code class="inline">NotAllowedError</code>, and any iframe you embed will also be denied, regardless of its <code class="inline">allow</code> attribute. This is the correct default for any browser feature your site does not actively use. Compare with <code class="inline">(self)</code>, which allows the feature on your own origin but denies it in third-party iframes unless you explicitly grant it.</p>
+      </details>
+      <details>
+        <summary>Can an iframe override a <code class="inline">Permissions-Policy</code> set by the parent?</summary>
+        <p>No. The parent page&rsquo;s header acts as a ceiling. If <code class="inline">camera=()</code> is set, even an iframe with <code class="inline">allow="camera"</code> in its markup will be denied camera access &mdash; the header wins over the attribute. An iframe can only use a feature if the parent&rsquo;s policy header allows it for that origin <em>and</em> the <code class="inline">allow</code> attribute grants it. You can use this to allow specific trusted iframes while keeping the site-wide default restrictive: set <code class="inline">camera=(self "https://trusted-embed.com")</code> in the header and add <code class="inline">allow="camera"</code> only to that specific iframe.</p>
+      </details>
+      <details>
+        <summary>Will setting <code class="inline">Permissions-Policy</code> break my site&rsquo;s existing features?</summary>
+        <p>Only if you deny a feature your site actively uses. Before deploying, check whether any page calls <code class="inline">navigator.geolocation.getCurrentPosition()</code>, <code class="inline">navigator.mediaDevices.getUserMedia()</code>, or the Payment Request API. If yes, set that feature to <code class="inline">(self)</code> rather than <code class="inline">()</code>. The safe approach is to deploy to a staging environment first, test your user flows, and verify that no feature-not-allowed errors appear in the browser console before shipping to production.</p>
+      </details>
+      <details>
+        <summary>Do I need to set <code class="inline">Permissions-Policy</code> for features I don&rsquo;t use?</summary>
+        <p>Yes &mdash; that is exactly the point of the header. Without it, browser APIs are governed only by permission prompts. A third-party script injected via a compromised dependency, or an iframe you embed (an ad, a widget), can request access to camera or geolocation and the user might grant it, thinking it&rsquo;s part of your app. Setting <code class="inline">camera=()</code> blocks that API unconditionally at the browser level, before any JavaScript runs. It is a one-line hardening that is low-effort and high-value for any site that does not use those features.</p>
+      </details>
+      <details>
+        <summary>How do I allow a feature for one page but not the whole site?</summary>
+        <p>The HTTP header applies to the entire origin. You cannot scope it to a single path. For page-level exceptions, the practical approach is: set a restrictive site-wide header, host the feature-using functionality on a dedicated subdomain with its own permissive header, or use a service worker to rewrite the header on that specific path. For iframe exceptions, the per-element <code class="inline">allow</code> attribute on the <code class="inline">&lt;iframe&gt;</code> tag gives you granular control: set <code class="inline">geolocation=()</code> in the header and add <code class="inline">allow="geolocation"</code> only to the specific iframes that need it.</p>
+      </details>
+      <details>
+        <summary>Does <code class="inline">Permissions-Policy</code> affect JavaScript APIs like <code class="inline">navigator.clipboard</code>?</summary>
+        <p>Yes. <code class="inline">clipboard-read</code> and <code class="inline">clipboard-write</code> control <code class="inline">navigator.clipboard.readText()</code> and <code class="inline">writeText()</code> respectively. If you set <code class="inline">clipboard-read=()</code> and a script calls <code class="inline">clipboard.readText()</code>, it will receive a <code class="inline">NotAllowedError</code>. Sites that use &ldquo;copy to clipboard&rdquo; buttons should set <code class="inline">clipboard-write=(self)</code> rather than <code class="inline">()</code>. Sites that never read from the clipboard (which is most sites) should set <code class="inline">clipboard-read=()</code>, since reading the clipboard without explicit user interaction is a common exfiltration pattern.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p><code class="inline">Permissions-Policy</code> is one of several security headers HardenCheck checks &mdash; here are guides for the others:</p>
+    <div class="suite">
+      <a href="referrer-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Referrer-Policy</span>
+        <p>Control what URL data leaks to external sites every time a visitor clicks a link or loads a resource.</p>
+      </a>
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level &mdash; so attackers can&rsquo;t strip the connection even if a visitor types http://.</p>
+      </a>
+      <a href="x-content-type-options-nosniff.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">X-Content-Type-Options</span>
+        <p>Stop MIME-sniffing attacks that turn uploaded files into executable scripts.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">ADA &amp; privacy</span>
+        <span class="s-name">ShipSafe</span>
+        <p>Check your site for WCAG accessibility failures and privacy-risk patterns before they become liabilities.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic guide</a>
+      <a href="csp-react-spa-app.html">React / SPA guide</a>
+      <a href="enable-hsts-header.html">HSTS guide</a>
+      <a href="x-frame-options-vs-csp-frame-ancestors.html">X-Frame-Options guide</a>
+      <a href="x-content-type-options-nosniff.html">X-Content-Type-Options</a>
+      <a href="referrer-policy-header.html">Referrer-Policy guide</a>
+      <a href="permissions-policy-header.html">Permissions-Policy guide</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
