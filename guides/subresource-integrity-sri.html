@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How to Add Subresource Integrity (SRI) — CDN Supply Chain Protection</title>
+<meta name="description" content="A compromised CDN can silently serve malicious JavaScript to every site that loads from it. Subresource Integrity (SRI) lets the browser verify the file hash before executing it — so a tampered CDN asset is blocked, not run.">
+<link rel="canonical" href="https://labs.copperbaytech.com/hardencheck/guides/subresource-integrity-sri.html">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HardenCheck">
+<meta property="og:title" content="How to Add Subresource Integrity (SRI) — CDN Supply Chain Protection">
+<meta property="og:description" content="The Polyfill.io compromise hit 100,000+ sites in 2024. With one integrity= attribute on every CDN script tag, the browser refuses to run tampered files. Learn how SRI works, how to generate hashes, and how to add it in Vite, webpack, and Next.js.">
+<meta property="og:url" content="https://labs.copperbaytech.com/hardencheck/guides/subresource-integrity-sri.html">
+<meta property="og:image" content="https://labs.copperbaytech.com/hardencheck/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#faf8f4">
+<link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"TechArticle","headline":"How to Add Subresource Integrity (SRI) — CDN Supply Chain Protection","description":"Subresource Integrity (SRI) lets browsers verify a CDN-served script or stylesheet against a cryptographic hash you embed in the HTML tag. If the CDN is compromised and the file is tampered with, the hash won't match and the browser refuses to execute it — blocking the attack at the point of delivery. This guide explains how SRI works, how to generate hashes with openssl and build tools, the crossorigin attribute requirement, what SRI does not protect, and how to add it in Vite, webpack, and Next.js.","author":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"publisher":{"@type":"Organization","name":"Copper Bay Labs","url":"https://copperbaytech.com"},"datePublished":"2026-10-29","dateModified":"2026-10-29","mainEntityOfPage":"https://labs.copperbaytech.com/hardencheck/guides/subresource-integrity-sri.html","mainEntity":{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is Subresource Integrity and how does it work?","acceptedAnswer":{"@type":"Answer","text":"Subresource Integrity (SRI) is a browser security feature that lets you pin a cryptographic hash to an external resource. You add an integrity attribute to a script or link tag containing a base64-encoded sha256, sha384, or sha512 hash of the file's contents. When the browser fetches the resource, it hashes what it receives and compares it to the value in your HTML. If they match, the resource is loaded. If they don't match — because the CDN was compromised, the file was corrupted in transit, or the URL was hijacked — the browser refuses to execute or apply the resource and logs a console error."}},{"@type":"Question","name":"Does SRI protect against CDN supply chain attacks like the Polyfill.io compromise?","acceptedAnswer":{"@type":"Answer","text":"Yes — exactly. In June 2024 the polyfill.io CDN was acquired by a new owner who modified the served JavaScript to inject malicious redirects into over 100,000 websites. Any site loading from that CDN without an integrity attribute ran the attacker's code. A site with a correct integrity hash would have gotten a browser-blocked load error instead — users would have seen a broken feature, not a compromised page. This is the canonical case SRI was designed for: a CDN you don't control changing what it serves."}},{"@type":"Question","name":"How do I generate an SRI hash for a CDN resource?","acceptedAnswer":{"@type":"Answer","text":"The fastest method is the openssl command: curl -s https://cdn.example.com/file.js | openssl dgst -sha384 -binary | openssl base64 -A — the output is your hash, and the integrity value is sha384- followed by that string. Most CDN documentation pages (jsDelivr, cdnjs, Bootstrap, jQuery) show pre-generated SRI hashes on each version's download page — copy them from there. Build tools like Vite (via vite-plugin-sri) and webpack (via webpack-subresource-integrity) can generate and inject integrity attributes automatically at build time, which is the most reliable approach for dependencies that update frequently."}},{"@type":"Question","name":"Why do I need the crossorigin attribute with SRI?","acceptedAnswer":{"@type":"Answer","text":"SRI hash verification requires the browser to read the full response body, which is blocked by the same-origin policy for cross-origin resources unless the server opts in to CORS. The crossorigin=\"anonymous\" attribute tells the browser to make the request in CORS mode. Without it, the browser cannot perform hash verification on cross-origin resources and may either refuse the load entirely or bypass SRI. The CDN must respond with Access-Control-Allow-Origin: * (or the requesting origin) for this to work — essentially all major CDNs do. If a CDN doesn't support CORS, SRI cannot be used with it."}},{"@type":"Question","name":"Does SRI work for resources fetched with JavaScript (fetch, XHR, dynamic import)?","acceptedAnswer":{"@type":"Answer","text":"No. SRI only applies to static HTML tags: script tags with a src attribute and link tags with rel=stylesheet. Fetch requests, XMLHttpRequest, dynamic script element creation (document.createElement), and dynamic import() are not covered by SRI — even if you could attach a hash somehow, the browser doesn't verify it. If you dynamically load resources from untrusted CDNs, SRI alone is not sufficient protection; you'd need to route them through your own origin or use a Content Security Policy to restrict which domains can serve scripts."}},{"@type":"Question","name":"What happens if the SRI hash doesn't match?","acceptedAnswer":{"@type":"Answer","text":"The browser blocks the resource. For a script, it fires a network error event on the script element and the script body is not executed. For a stylesheet, the styles are not applied. Neither the document nor the page state is corrupted by the load attempt — the blocking happens before the content is handed to the rendering engine. The browser logs a console message identifying the mismatch. The page typically still loads with a missing feature or unstyled element, which is a far better outcome than silently running attacker-controlled code."}},{"@type":"Question","name":"Does HardenCheck check for SRI on CDN resources?","acceptedAnswer":{"@type":"Answer","text":"HardenCheck grades HTTP response headers and cookie flags — it does not parse your HTML for script tags or check individual resource integrity attributes. To audit SRI coverage, inspect your page's source for any external script or link tags that load from a CDN domain and check whether each has an integrity attribute. Browser DevTools (Sources tab) lists all loaded scripts and their origin. A Content Security Policy with require-sri-for script style (available in some browsers) can enforce that every loaded resource has an integrity attribute, and HardenCheck grades your CSP strength."}}]}}
+</script>
+<link rel="stylesheet" href="../styles.css?v=1">
+<style>
+  .doc .lede{font-size:clamp(17px,2.3vw,20px);color:var(--muted)}
+  .doc h2{scroll-margin-top:80px}
+  .doc h3{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:19px;margin:22px 0 6px;letter-spacing:-.01em}
+  .toc{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 6px;padding:0;list-style:none}
+  .toc a{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:14px;font-weight:600;color:var(--muted)}
+  .toc a:hover{border-color:var(--bay);color:var(--ink);text-decoration:none}
+  .callout.warn-callout{background:var(--fail-bg);border-left-color:var(--fail);color:#5e2019}
+  .callout.tip-callout{background:var(--pass-bg);border-left-color:var(--pass);color:#1b4d30}
+  .callout.info-callout{background:var(--surface);border-left:4px solid var(--bay);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+  .doc code.inline{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:var(--line-2);padding:2px 6px;border-radius:5px}
+  pre{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;margin:12px 0}
+  pre code{background:none;padding:0;font-size:inherit}
+  .severity-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:14px}
+  .severity-table th{text-align:left;padding:10px 12px;background:var(--surface);border-bottom:2px solid var(--line);font-weight:600}
+  .severity-table td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  .severity-table tr:last-child td{border-bottom:none}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;vertical-align:middle}
+  .badge.safe{background:#d4edda;color:#1b4d30}
+  .badge.caution{background:#fff3cd;color:#7a5500}
+  .badge.risky{background:var(--fail-bg);color:#5e2019}
+  .suite{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin:18px 0 6px}
+  .suite a{display:block;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow);transition:box-shadow .15s,transform .15s,border-color .15s}
+  .suite a:hover{text-decoration:none;box-shadow:var(--shadow-lift);transform:translateY(-2px);border-color:var(--line-2)}
+  .suite .s-name{font-family:"Fraunces",serif;font-weight:600;font-size:17px;color:var(--ink);display:block;margin:0 0 4px}
+  .suite p{color:var(--muted);font-size:14px;margin:0}
+  .suite .s-tag{display:inline-block;margin-bottom:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--bay);background:var(--bay-tint,#e8f4f6);border:1px solid #cfe1e3;border-radius:6px;padding:2px 8px}
+  .faq-section{margin:18px 0}
+  .faq-section details{border-bottom:1px solid var(--line);padding:14px 0}
+  .faq-section details:first-child{border-top:1px solid var(--line)}
+  .faq-section summary{font-weight:600;cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .faq-section summary::-webkit-details-marker{display:none}
+  .faq-section summary::after{content:"+";font-size:20px;color:var(--muted);flex-shrink:0}
+  .faq-section details[open] summary::after{content:"\2212"}
+  .faq-section details p,.faq-section details ul{margin:12px 0 4px;color:var(--muted)}
+  .coverage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:16px 0}
+  .coverage-card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+  .coverage-card h3{margin:0 0 6px;font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:17px}
+  .coverage-card p{margin:0;font-size:14px;color:var(--muted)}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to main content</a>
+
+<header class="masthead" role="banner">
+  <div class="wrap hdr-bar">
+    <a class="brand" href="../" aria-label="HardenCheck &mdash; go to homepage">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#bf6b3c"/>
+        <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+        <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+        <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+        <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="wordmark">HardenCheck</span>
+    </a>
+    <nav class="nav" aria-label="Primary navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic</a>
+      <a href="fix-cors-misconfiguration.html">CORS</a>
+      <a href="subresource-integrity-sri.html" aria-current="page">SRI</a>
+      <a href="../">Check my headers</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<article class="doc">
+  <div class="wrap narrow">
+    <p class="eyebrow" style="text-align:left">Security guide</p>
+    <h1>How to Add Subresource Integrity (SRI)</h1>
+    <p class="lede">In June 2024 the Polyfill.io CDN was acquired by new owners who used it to inject malicious JavaScript into over 100,000 websites. Every site loading from that CDN without an <code class="inline">integrity</code> attribute ran the attacker&rsquo;s code. Every site with a correct SRI hash got a browser-blocked load error instead. One attribute, one hash: that is the entire defence.</p>
+
+    <ul class="toc" aria-label="On this page">
+      <li><a href="#how-sri-works">How SRI works</a></li>
+      <li><a href="#generate-hash">Generating the hash</a></li>
+      <li><a href="#crossorigin">The crossorigin attribute</a></li>
+      <li><a href="#what-sri-covers">What SRI covers</a></li>
+      <li><a href="#build-tools">Build tool integration</a></li>
+      <li><a href="#verify">Verify with HardenCheck</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ul>
+
+    <h2 id="how-sri-works">How SRI works</h2>
+    <p>Subresource Integrity adds two attributes to a <code class="inline">&lt;script&gt;</code> or <code class="inline">&lt;link rel="stylesheet"&gt;</code> tag: <code class="inline">integrity</code> and <code class="inline">crossorigin</code>. The <code class="inline">integrity</code> value is a hash algorithm name followed by a hyphen and a base64-encoded hash of the file&rsquo;s exact bytes:</p>
+    <pre><code>&lt;script
+  src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"
+  integrity="sha512-WFN04846sdKMIP5LKNphMaWzU7YpMyCU245etK3g/2ARYbPK9Ub18eG+ljU96qKRCWh+quCY7yefSmlkQw1ANQ=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"&gt;&lt;/script&gt;</code></pre>
+    <p>When the browser fetches the resource, it hashes the response body using the algorithm specified and compares it to your hash. If they match, the file is executed or applied. If they differ &mdash; because the CDN was compromised, the file was modified, or an attacker performed a man-in-the-middle attack &mdash; the browser blocks the resource and logs a network error. The page sees a failed script load, not an injected script.</p>
+
+    <div class="callout info-callout">
+      <strong>SRI is your defence when the CDN is the attacker.</strong> It does nothing to protect against XSS from your own origin, malicious code in npm packages you bundle yourself, or dynamically loaded scripts. It specifically targets the scenario where a third-party file host delivers something different than what you originally validated.
+    </div>
+
+    <p>Three hash algorithms are supported: <code class="inline">sha256</code>, <code class="inline">sha384</code>, and <code class="inline">sha512</code>. Use <code class="inline">sha384</code> or <code class="inline">sha512</code> &mdash; sha256 is no longer recommended for new deployments. You can specify multiple hashes separated by spaces if you want to support parallel file versions:</p>
+    <pre><code>integrity="sha384-abc123... sha512-def456..."
+&lt;!-- browser accepts the resource if ANY listed hash matches --&gt;</code></pre>
+
+    <h2 id="generate-hash">Generating the hash</h2>
+    <p>There are three reliable methods:</p>
+
+    <h3>1. openssl (always available)</h3>
+    <pre><code># Download the file and hash it in one pipeline
+curl -s https://cdn.example.com/library.min.js \
+  | openssl dgst -sha384 -binary \
+  | openssl base64 -A
+
+# Then prefix with the algorithm name:
+# integrity="sha384-&lt;output&gt;"
+</code></pre>
+
+    <h3>2. CDN documentation pages</h3>
+    <p>Most major CDNs provide pre-generated SRI hashes on each version&rsquo;s download page &mdash; they are the authoritative source since they hash the canonical file. Check:</p>
+    <ul>
+      <li><strong>jsDelivr</strong> &mdash; every package version page has a &ldquo;Show SRI&rdquo; link</li>
+      <li><strong>cdnjs</strong> &mdash; copy icon next to each file shows the tag with integrity pre-filled</li>
+      <li><strong>Bootstrap, jQuery, React</strong> official docs &mdash; CDN install snippets always include integrity attributes</li>
+    </ul>
+    <p>Copy SRI hashes from the CDN&rsquo;s own docs rather than computing them yourself when available, because you verify the file as the CDN intended to serve it.</p>
+
+    <h3>3. npm package hash (for known versions)</h3>
+    <pre><code># If you have the package locally (e.g. from node_modules)
+cat node_modules/react/umd/react.production.min.js \
+  | openssl dgst -sha384 -binary \
+  | openssl base64 -A</code></pre>
+
+    <div class="callout warn-callout">
+      <strong>Regenerate the hash every time the file changes.</strong> If you upgrade a library version, the hash changes. A stale integrity value blocks your own legitimate file update and breaks the site. Build tool integration (below) handles this automatically.
+    </div>
+
+    <h2 id="crossorigin">The crossorigin attribute</h2>
+    <p>SRI requires the browser to read the full response body of the fetched resource to compute its hash. For cross-origin resources (a CDN URL), the same-origin policy blocks this unless the server opts in to CORS. The <code class="inline">crossorigin="anonymous"</code> attribute tells the browser to make the request in CORS mode without sending credentials.</p>
+    <p>This means the CDN <em>must</em> respond with <code class="inline">Access-Control-Allow-Origin: *</code> (or the requesting origin). All major public CDNs (jsDelivr, cdnjs, Cloudflare CDN, unpkg) support CORS on their served files. If a CDN does not send a CORS header, the browser cannot perform SRI verification and the resource load fails.</p>
+
+    <table class="severity-table">
+      <thead>
+        <tr><th>Scenario</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>CDN supports CORS, hash correct</td><td><span class="badge safe">Load succeeds</span></td></tr>
+        <tr><td>CDN supports CORS, hash mismatch (compromised file)</td><td><span class="badge risky">Browser blocks load</span></td></tr>
+        <tr><td>CDN supports CORS, no integrity attribute</td><td><span class="badge caution">Loads without verification</span></td></tr>
+        <tr><td>CDN has no CORS header, integrity present</td><td><span class="badge risky">Browser blocks load</span></td></tr>
+        <tr><td>Same-origin resource, no crossorigin needed</td><td><span class="badge safe">SRI works without crossorigin</span></td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="what-sri-covers">What SRI covers &mdash; and what it does not</h2>
+
+    <div class="coverage-grid">
+      <div class="coverage-card">
+        <h3>&#x2705; Covered</h3>
+        <p><code class="inline">&lt;script src="..."&gt;</code> tags<br>with an <code class="inline">integrity</code> attribute</p>
+      </div>
+      <div class="coverage-card">
+        <h3>&#x2705; Covered</h3>
+        <p><code class="inline">&lt;link rel="stylesheet" href="..."&gt;</code> tags with an <code class="inline">integrity</code> attribute</p>
+      </div>
+      <div class="coverage-card">
+        <h3>&#x26A0;&#xFE0F; Not covered</h3>
+        <p><code class="inline">fetch()</code>, <code class="inline">XMLHttpRequest</code>, <code class="inline">dynamic import()</code> &mdash; runtime-loaded resources cannot be SRI-verified</p>
+      </div>
+      <div class="coverage-card">
+        <h3>&#x26A0;&#xFE0F; Not covered</h3>
+        <p>Scripts you bundle yourself via npm &mdash; the hash is of your bundle, not the CDN&rsquo;s copy</p>
+      </div>
+      <div class="coverage-card">
+        <h3>&#x26A0;&#xFE0F; Not covered</h3>
+        <p>Resources loaded by scripts (scripts that load other scripts, analytics injecting tags)</p>
+      </div>
+      <div class="coverage-card">
+        <h3>&#x26A0;&#xFE0F; Not covered</h3>
+        <p>Images, fonts, <code class="inline">&lt;iframe&gt;</code> content &mdash; SRI is specified only for script and link elements</p>
+      </div>
+    </div>
+
+    <div class="callout info-callout">
+      <strong>SRI + CSP together.</strong> A Content-Security-Policy with <code class="inline">require-sri-for script style</code> (partial browser support) enforces that every loaded script and stylesheet has a valid integrity attribute &mdash; the browser refuses any that don&rsquo;t. Combined with a tight <code class="inline">script-src</code> allowlist, this closes the gap where an attacker adds a new CDN script tag without a hash.
+    </div>
+
+    <h2 id="build-tools">Build tool integration</h2>
+    <p>Manual hash management is error-prone. Build tools can generate and inject SRI hashes at build time, which is the recommended approach for production sites that update dependencies regularly.</p>
+
+    <h3>Vite &mdash; vite-plugin-sri</h3>
+    <pre><code>// Install
+npm install -D vite-plugin-sri3
+
+// vite.config.js
+import { defineConfig } from 'vite'
+import sri from 'vite-plugin-sri3'
+
+export default defineConfig({
+  plugins: [
+    sri({
+      // default algorithm is sha384
+      algorithm: 'sha384',
+    }),
+  ],
+})
+
+// After build, script tags in dist/index.html
+// automatically get integrity attributes</code></pre>
+
+    <h3>webpack &mdash; webpack-subresource-integrity</h3>
+    <pre><code>// Install
+npm install -D webpack-subresource-integrity
+
+// webpack.config.js
+const { SubresourceIntegrityPlugin } = require('webpack-subresource-integrity')
+
+module.exports = {
+  output: {
+    crossOriginLoading: 'anonymous',
+  },
+  plugins: [
+    new SubresourceIntegrityPlugin({
+      hashFuncNames: ['sha384'],
+      enabled: process.env.NODE_ENV === 'production',
+    }),
+  ],
+}</code></pre>
+
+    <h3>Next.js (experimental)</h3>
+    <pre><code>// next.config.js
+module.exports = {
+  experimental: {
+    sri: {
+      algorithm: 'sha384',
+    },
+  },
+}
+// Adds integrity attributes to all script tags in the generated HTML
+// Requires Next.js 13.4+ and is marked experimental</code></pre>
+
+    <h3>Manual HTML (static sites, CDN includes)</h3>
+    <p>For libraries loaded directly from a CDN in static HTML, add the attributes by hand. Check the CDN&rsquo;s own documentation for the correct hash &mdash; do not compute it from a local copy that might differ from what the CDN serves:</p>
+    <pre><code>&lt;!-- Bootstrap 5.3 from jsDelivr --&gt;
+&lt;link
+  rel="stylesheet"
+  href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+  integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+  crossorigin="anonymous"&gt;
+
+&lt;script
+  src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+  integrity="sha384-YvpcrYf0tY3lHB60NNkmXc4s9bIOgUxi8T/jzmqdl12WBQIB20cVqbSx3iJqfHhV"
+  crossorigin="anonymous"&gt;&lt;/script&gt;</code></pre>
+
+    <h3>What to do when an SRI-blocked load breaks your site</h3>
+    <p>When you update a library version, the hash changes. If the <code class="inline">integrity</code> value in your HTML still references the old hash, the browser blocks the new file. You&rsquo;ll see a console error like:</p>
+    <pre><code>Failed to find a valid digest in the 'integrity' attribute for resource
+'https://cdn.example.com/library.min.js' with computed SHA-384 integrity
+'sha384-XYZ...'. The resource has been blocked.</code></pre>
+    <p>The fix: regenerate the hash for the new file version (method 1 or 2 above) and update the <code class="inline">integrity</code> attribute. If you are using a build tool plugin, rebuilding the project handles this automatically.</p>
+
+    <h2 id="verify">Verify with HardenCheck</h2>
+    <p>HardenCheck grades your HTTP response headers including your Content-Security-Policy, which can include a <code class="inline">require-sri-for</code> directive. To check that SRI attributes are actually present on your external resource tags, inspect your page HTML directly &mdash; browser DevTools &rarr; Sources lists all loaded scripts and their origin, and View Source shows whether each external tag has an <code class="inline">integrity</code> attribute.</p>
+    <p style="margin:24px 0 8px"><a class="btn primary" href="../">Check my headers with HardenCheck &rarr;</a></p>
+
+    <h2 id="faq">Frequently asked questions</h2>
+    <div class="faq-section">
+      <details open>
+        <summary>What is Subresource Integrity and how does it work?</summary>
+        <p>SRI is a browser security feature that lets you pin a cryptographic hash to an external <code class="inline">&lt;script&gt;</code> or <code class="inline">&lt;link&gt;</code> tag. You add an <code class="inline">integrity</code> attribute containing a base64-encoded sha384 (or sha512) hash of the file. When the browser fetches the resource, it hashes what it receives and compares it to your value. A match means the file is identical to what you validated. A mismatch &mdash; caused by a compromised CDN, a modified file, or a network attack &mdash; causes the browser to block the resource from executing.</p>
+      </details>
+      <details>
+        <summary>Does SRI protect against CDN supply chain attacks like the Polyfill.io compromise?</summary>
+        <p>Yes &mdash; exactly. In June 2024 the polyfill.io CDN was acquired by new owners who modified served JavaScript to inject malicious redirects into over 100,000 websites. Any site without an <code class="inline">integrity</code> attribute ran the attacker&rsquo;s code silently. Any site with a correct SRI hash got a browser-blocked load error instead &mdash; the user sees a broken widget, not a compromised session. This is the canonical case SRI was designed for: a CDN you don&rsquo;t control serving something different than what you originally validated.</p>
+      </details>
+      <details>
+        <summary>How do I generate an SRI hash for a CDN resource?</summary>
+        <p>Three methods: (1) <code class="inline">curl -s URL | openssl dgst -sha384 -binary | openssl base64 -A</code> &mdash; prefix the output with <code class="inline">sha384-</code>. (2) Copy from the CDN&rsquo;s own documentation &mdash; jsDelivr, cdnjs, Bootstrap, and jQuery all show pre-generated SRI hashes on each version&rsquo;s page. (3) Use a build tool plugin (vite-plugin-sri3, webpack-subresource-integrity) that generates and injects hashes automatically at build time, which is the most reliable approach for projects that update dependencies regularly.</p>
+      </details>
+      <details>
+        <summary>Why do I need the crossorigin attribute with SRI?</summary>
+        <p>The browser needs to read the full response body to compute its hash, which is blocked by the same-origin policy for cross-origin resources. <code class="inline">crossorigin="anonymous"</code> triggers a CORS request (no credentials), and the CDN must respond with <code class="inline">Access-Control-Allow-Origin: *</code>. All major public CDNs support this. Without <code class="inline">crossorigin</code>, the browser cannot verify the hash and either blocks the resource or skips verification depending on the browser version.</p>
+      </details>
+      <details>
+        <summary>Does SRI work for resources fetched with JavaScript?</summary>
+        <p>No. SRI only applies to static HTML tags: <code class="inline">&lt;script src&gt;</code> and <code class="inline">&lt;link rel="stylesheet"&gt;</code>. It does not apply to <code class="inline">fetch()</code>, <code class="inline">XMLHttpRequest</code>, <code class="inline">import()</code>, or scripts that dynamically create new <code class="inline">&lt;script&gt;</code> elements at runtime. For those, a tight <code class="inline">script-src</code> Content-Security-Policy that allowlists only specific CDN origins is the complementary control.</p>
+      </details>
+      <details>
+        <summary>What happens if the SRI hash doesn&rsquo;t match?</summary>
+        <p>The browser blocks the resource. For a script, the code is never executed. For a stylesheet, the styles are not applied. The block happens before the content touches the rendering engine. The browser logs a console error identifying the hash mismatch and the blocked URL. The page continues to load but the feature depending on that resource will be broken &mdash; which is the intended outcome: a broken widget is recoverable; silently executed attacker code is not.</p>
+      </details>
+      <details>
+        <summary>Does HardenCheck check for SRI on CDN resources?</summary>
+        <p>HardenCheck grades HTTP response headers including your CSP &mdash; it does not parse your HTML for individual script tag attributes. To audit SRI coverage, inspect your page HTML (View Source or DevTools &rarr; Sources) and check that every external <code class="inline">&lt;script src&gt;</code> and <code class="inline">&lt;link href&gt;</code> pointing to a CDN has an <code class="inline">integrity</code> attribute. HardenCheck does grade your CSP strength, including whether it has a restrictive <code class="inline">script-src</code> that limits which CDN domains can serve scripts to your page.</p>
+      </details>
+    </div>
+
+    <h2 style="margin-top:48px">Also in the Copper Bay Labs ship-safety suite</h2>
+    <p>SRI protects specific CDN script tags &mdash; here are guides for the other layers of browser security HardenCheck covers:</p>
+    <div class="suite">
+      <a href="add-content-security-policy-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Add a CSP header</span>
+        <p>A Content-Security-Policy with a tight <code>script-src</code> limits which origins can serve scripts &mdash; complementing SRI for dynamically loaded resources.</p>
+      </a>
+      <a href="fix-cors-misconfiguration.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Fix CORS misconfigurations</span>
+        <p>SRI requires CDN CORS support. This guide explains how CORS works and how to configure it correctly on your own API endpoints.</p>
+      </a>
+      <a href="enable-hsts-header.html">
+        <span class="s-tag">Fix guide</span>
+        <span class="s-name">Enable HSTS</span>
+        <p>Force HTTPS at the browser level &mdash; so attackers can&rsquo;t strip the connection and intercept CDN responses before SRI can check them.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Secret scanning</span>
+        <span class="s-name">LeakCheck</span>
+        <p>Paste code or a config file and see exposed API keys and secrets flagged before they reach the repo.</p>
+      </a>
+      <a href="https://labs.copperbaytech.com/hardencheck/" target="_blank" rel="noopener noreferrer">
+        <span class="s-tag">Header scanner</span>
+        <span class="s-name">HardenCheck</span>
+        <p>Paste your site&rsquo;s response headers and get an instant security grade with fix guidance for every flagged header.</p>
+      </a>
+    </div>
+  </div>
+</article>
+</main>
+
+<footer class="footer" role="contentinfo">
+  <div class="wrap foot">
+    <div>
+      <a class="brand small" href="../" aria-label="HardenCheck &mdash; homepage">
+        <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+          <path d="M32 4 54 12 V30 C54 44 45 54 32 60 C19 54 10 44 10 30 V12 Z" fill="#cbd2da"/>
+          <path d="M32 10 48 16 V30 C48 41 41.5 49 32 54 C22.5 49 16 41 16 30 V16 Z" fill="#14181f"/>
+          <rect x="23" y="22" width="18" height="3.4" rx="1.7" fill="#faf8f4"/>
+          <rect x="23" y="29" width="13" height="3.4" rx="1.7" fill="#7d8893"/>
+          <path d="M24 37.5 L30 43.5 L42 31.5" fill="none" stroke="#bf6b3c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="wordmark">HardenCheck</span>
+      </a>
+      <p class="fine">A header &amp; cookie hardening check &mdash; not a full security audit or guarantee.</p>
+    </div>
+    <nav class="foot-nav" aria-label="Footer navigation">
+      <a href="../about.html">How it works</a>
+      <a href="add-content-security-policy-header.html">CSP basics</a>
+      <a href="content-security-policy-strict-dynamic.html">strict-dynamic guide</a>
+      <a href="csp-react-spa-app.html">React / SPA guide</a>
+      <a href="enable-hsts-header.html">HSTS guide</a>
+      <a href="x-frame-options-vs-csp-frame-ancestors.html">X-Frame-Options guide</a>
+      <a href="x-content-type-options-nosniff.html">X-Content-Type-Options</a>
+      <a href="referrer-policy-header.html">Referrer-Policy guide</a>
+      <a href="permissions-policy-header.html">Permissions-Policy guide</a>
+      <a href="fix-cors-misconfiguration.html">CORS guide</a>
+      <a href="subresource-integrity-sri.html">SRI guide</a>
+      <a href="https://labs.copperbaytech.com/shipsafe/" target="_blank" rel="noopener noreferrer">ShipSafe</a>
+      <a href="https://labs.copperbaytech.com/leakcheck/" target="_blank" rel="noopener noreferrer">LeakCheck</a>
+      <a href="https://labs.copperbaytech.com/exposurecheck/" target="_blank" rel="noopener noreferrer">ExposureCheck</a>
+      <a href="https://labs.copperbaytech.com/depcheck/" target="_blank" rel="noopener noreferrer">DepCheck</a>
+      <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Secure my project &rarr;</a>
+    </nav>
+  </div>
+  <div class="wrap">
+    <p class="madeby">A <a href="https://copperbaytech.com" target="_blank" rel="noopener noreferrer">Copper Bay Labs</a> product.
+    <span class="disclaimer">This is a free hardening tool, not professional security advice.</span></p>
+  </div>
+</footer>
+
+</body>
+</html>
